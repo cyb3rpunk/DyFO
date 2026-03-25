@@ -1,0 +1,11 @@
+[project]
+name = "dyfo"
+version = "0.1.0"
+description = "DyFO - Dynamic Financial Ontology with Temporal Graph Networks"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+include = ["dyfo*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
