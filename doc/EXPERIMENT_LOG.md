@@ -1,0 +1,304 @@
+# DyFO — Experiment Log: Link Prediction Pre-Training
+
+> Registro sistemático dos experimentos de pré-treinamento self-supervised do TGN
+> via link prediction, incluindo versões do código, resultados e lições aprendidas.
+> Destinado a subsidiar a escrita do artigo.
+
+---
+
+## 1. Visão Geral do Experimento
+
+**Objetivo:** Validar que o TGN do DyFO aprende representações temporais de grafos
+financeiros capazes de prever a estrutura de correlação futura entre ativos.
+
+**Tarefa:** Given embeddings $z_i(t)$, $z_j(t)$, prever se $|\rho_{ij}(t+1)| \geq \theta$.
+
+**Protocolo:** Walk-forward 60/20/20 com memória herdada entre splits (sem reset
+na transição train→val→test), conforme Manual §5.3.
+
+**Arquitetura base:**
+- TGN-attn 1L, memória GRU (dim=172), embedding dim=100
+- 2 attention heads, 10 vizinhos
+- Link predictor: MLP 200→64→32→1
+
+---
+
+## 2. Changelog de Versões
+
+### v0.1 — Baseline Inicial (10 ativos, 5 épocas)
+**Run:** `link_pred_20260325_163246`
+**Data:** 2026-03-25 16:32
+
+**Configuração:**
+- Tickers: AAPL, MSFT, GOOGL, AMZN, NVDA, JPM, XOM, JNJ, PG, MA (10)
+- Período: 2020-01-01 → 2024-12-31
+- Epochs: 5, LR: 1e-3, neg_ratio: 1.0, corr_threshold: 0.3
+- Loss: BCE padrão
+- Eventos: PRICE_UPDATE + CORRELATION_UPDATE + MACRO (sem EARNINGS, sem CORP_ACTION — bug tz-naive)
+
+**Resultados:**
+
+| Métrica | Train | Val | Test |
+|---------|-------|-----|------|
+| AUC | 0.779 | **0.850** | **0.754** |
+| F1 | 0.888 | 0.801 | 0.732 |
+| Accuracy | 0.846 | 0.696 | 0.613 |
+| Precision | 0.868 | 0.682 | 0.585 |
+| Recall | 0.922 | 0.998 | 0.987 |
+
+- Best epoch: 1/5
+- Total params: 556,909
+- Walk-forward: 754 train / 252 val / 252 test days
+
+**Observações:**
+- Recall altíssimo (~99%) mas precision baixa (~58%) → viés para prever "positivo"
+- Best epoch=1 sugere overfitting rápido no grafo denso (45 pares para 10 ativos)
+- 0 earnings events e 0 corp_action events por bug de timezone
+
+**Bugs identificados:**
+1. `TypeError: Cannot compare tz-naive and tz-aware timestamps` em `get_earnings_dates()` e `get_corporate_actions()` — yfinance retorna timestamps tz-aware mas comparávamos com `pd.Timestamp("2020-01-01")` tz-naive
+2. `TypeError: 'NoneType' object is not subscriptable` em `get_corporate_actions()` — acesso direto a `row["Stock Splits"]` quando a coluna pode ser None
+
+---
+
+### v0.2 — Correção de Timezone + Escala para 20 Ativos
+**Run:** `link_pred_20260325_175054`
+**Data:** 2026-03-25 17:50
+
+**Modificações:**
+- **Fix tz-naive/tz-aware:** `ts.tz_localize(None)` antes de comparações em `yfinance_adapter.py`
+- **Fix NoneType:** uso de `row.get()` com verificação de None para splits/dividends
+- **Escala:** 20 tickers diversificados por setor GICS (Tech 4, Fin 3, Health 2, Disc 2, Staples 2, Energy 2, Industrial 2, Comm 1, Materials 1, Utilities 1)
+- Epochs: 8, neg_ratio: 2.0
+- Early stopping com patience=5
+
+**Configuração:**
+- Tickers: AAPL, MSFT, GOOGL, NVDA, JPM, GS, MA, JNJ, UNH, AMZN, TSLA, PG, KO, XOM, CVX, CAT, BA, META, LIN, NEE (20)
+- Período: 2020-01-01 → 2024-12-31
+- Loss: BCE padrão
+
+**Resultados:**
+
+| Métrica | Train | Val | Test |
+|---------|-------|-----|------|
+| AUC | 0.883 | 0.726 | **0.687** |
+| F1 | 0.894 | 0.720 | 0.613 |
+| Accuracy | 0.860 | 0.583 | 0.495 |
+| Precision | — | — | 0.462 |
+| Recall | — | — | 0.939 |
+
+- Best epoch: 8/8 (sem early stopping)
+- Eventos: 25,120 PRICE + **380 EARNINGS + 316 CORP_ACTION** + 13,700 MACRO + 113,470 CORR = 152,986 total
+- Walk-forward: 755 train / 252 val / 252 test days
+
+**Observações:**
+- Earnings e corp_action agora capturados corretamente
+- Val AUC melhorou progressivamente em todos os 8 epochs → mais epochs ajudariam
+- **Gap train-test ampliou:** problema mais difícil com 190 pares (vs 45 do v0.1)
+- Precision caiu de 58% para 46% — viés para "sim" persiste
+
+---
+
+### v0.3a — Focal Loss (experiment — descartado)
+**Run:** `link_pred_20260325_192412`
+**Data:** 2026-03-25 19:24
+
+**Modificações:**
+- Focal loss (α=0.25, γ=2.0) implementada em `link_prediction.py`
+- Weight decay: 1e-4
+
+**Resultados:**
+
+| Métrica | Test |
+|---------|------|
+| AUC | 0.546 |
+| F1 | 0.603 |
+| Precision | 0.439 |
+| Recall | 1.000 |
+
+**Conclusão:** ❌ Descartado. Focal loss com γ=2 suprimiu gradientes excessivamente — modelo quase não aprendeu (AUC~0.55, perto de random). A modulação exponencial do gradiente é adequada para object detection com milhares de anchors, mas não para link prediction financeira com poucos samples por dia.
+
+---
+
+### v0.3b — BCE + pos_weight=0.5 (experiment — descartado)
+**Run:** `link_pred_20260325_205536`
+**Data:** 2026-03-25 20:55
+
+**Modificações:**
+- BCE com pos_weight=0.5 (penaliza positivos, favorece aprendizado de negativos)
+- Weight decay: 1e-4
+
+**Resultados:**
+
+| Métrica | Test |
+|---------|------|
+| AUC | 0.659 |
+| F1 | 0.618 |
+| Precision | 0.455 |
+| Recall | 0.988 |
+
+**Conclusão:** ❌ Descartado. Marginal improvement over focal loss mas ainda significativamente pior que BCE padrão. A redução do peso dos positivos impediu o modelo de aprender o sinal de correlação.
+
+---
+
+### v0.3c — BCE + neg_ratio=3.0 (experiment — descartado)
+**Run:** `link_pred_20260325_213010`
+**Data:** 2026-03-25 21:30
+
+**Modificações:**
+- BCE padrão (pos_weight=1.0), neg_ratio=3.0
+- Weight decay: 1e-4
+- Threshold tuning on validation set
+
+**Resultados:**
+
+| Métrica | Test |
+|---------|------|
+| AUC | 0.619 |
+| F1 | 0.596 |
+| Precision | 0.439 |
+| Recall | 0.970 |
+
+- Optimal logit threshold: 1.60
+
+**Conclusão:** ❌ Descartado. Aumentar neg_ratio além de 2.0 diluiu o sinal positivo sem melhorar discriminação. O modelo não consegue distinguir negativos aleatórios dos positivos verdadeiros com mais noise.
+
+---
+
+### v0.4 — Regressão de ρ Contínua (Huber Loss)
+**Run:** `link_pred_20260325_225610`
+**Data:** 2026-03-25 22:56
+
+**Modificações:**
+- Tarefa alterada de classificação binária para **regressão contínua** de ρ
+- `CorrelationRegressor`: MLP com tanh output → predição em [-1, 1]
+- Loss: Huber (SmoothL1) em vez de BCE
+- Labels: rolling Pearson sem sparsificação (todos os pares, não apenas |ρ|≥0.3)
+- 20 tickers, 10 epochs, weight_decay=1e-4
+
+**Resultados:**
+
+| Métrica | Train (ep6) | Val (ep1=best) | Test |
+|---------|-------------|----------------|------|
+| MSE (Huber) | 0.029 | 0.090 | **0.153** |
+| MAE | 0.134 | 0.249 | **0.338** |
+| R² | 0.326 | -1.242 | **-2.084** |
+| Spearman | 0.577 | 0.040 | **0.142** |
+| cls F1(@0.5) | — | — | 0.026 |
+
+- Best epoch: 1/10 (early stopped at 6)
+- Train learning curve: R² -0.45→+0.33, Spearman 0.01→0.58 (model learns!)
+- Val/Test: R² fortemente negativo → **overfitting severo**
+
+**Conclusão:** 🟡 Informativo. O modelo consegue aprender correlações no treino (Spearman=0.58)
+mas não generaliza. Diagnóstico: com 20 ativos e 190 pares, a complexidade do modelo
+(556K params) é excessiva para o volume de dados. A regressão é viável como tarefa,
+mas precisa de: (a) mais ativos (BL-01), (b) labels de melhor qualidade (BL-03 DCC-GARCH),
+(c) possivelmente regularização mais agressiva.
+**Status:** Não descartado — re-avaliar após BL-03 + BL-01.
+
+---
+
+## 3. Tabela Consolidada de Resultados
+
+### 3.1 Classificação (v0.1–v0.3)
+
+| Run | Version | Tickers | Epochs | Loss | neg_ratio | Test AUC | Test F1 | Test Prec | Test Recall | Val AUC | Best Ep |
+|-----|---------|---------|--------|------|-----------|----------|---------|-----------|-------------|---------|---------|
+| 163246 | **v0.1** | 10 | 5 | BCE | 1.0 | **0.754** | **0.732** | **0.585** | 0.987 | **0.850** | 1 |
+| 175054 | **v0.2** | 20 | 8 | BCE | 2.0 | 0.687 | 0.613 | 0.462 | 0.939 | 0.726 | 8 |
+| 192412 | v0.3a | 20 | 8 | Focal | 2.0 | 0.546 | 0.603 | 0.439 | 1.000 | 0.585 | 3 |
+| 205536 | v0.3b | 20 | 8 | BCE(pw=0.5) | 2.0 | 0.659 | 0.618 | 0.455 | 0.988 | 0.648 | 3 |
+| 213010 | v0.3c | 20 | 8 | BCE | 3.0 | 0.619 | 0.596 | 0.439 | 0.970 | 0.709 | 2 |
+
+### 3.2 Regressão (v0.4)
+
+| Run | Version | Tickers | Epochs | Loss | Test MSE | Test MAE | Test R² | Test Spearman | Val R² | Best Ep |
+|-----|---------|---------|--------|------|----------|----------|---------|---------------|--------|---------|
+| 225610 | **v0.4** | 20 | 10 | Huber | 0.153 | 0.338 | -2.084 | 0.142 | -1.242 | 1 |
+
+---
+
+## 4. Melhorias Implementadas vs. TGN Original (Rossi et al., 2020)
+
+### 4.1 Contribuições já implementadas
+
+| Aspecto | TGN Original | DyFO (nosso) | Justificativa |
+|---------|-------------|--------------|---------------|
+| **Domínio** | Social/Wikipedia (genérico) | Financeiro (não-estacionário) | Mercados têm regime shifts, sazonalidade, correlações variantes |
+| **Tipos de evento** | 1 (interação genérica) | **7 tipos heterogêneos** | PRICE_UPDATE, EARNINGS, FED_DECISION, CREDIT, CORP_ACTION, CORR_UPDATE, MACRO — cada um com features especializadas |
+| **Tipos de aresta** | 1 (homogêneo) | **4 tipos heterogêneos** | CORR, SECT, SUPL, FACT — edge type embedding aprendido (dim=16) |
+| **Node features** | Estáticas ou ausentes | **20-dim dinâmicas** | Retorno, vol, beta, setor, mcap, drawdown, regime_prob, vol_norm — atualizadas diariamente |
+| **Correlações** | Não aplicável | **Rolling Pearson com sparsificação** | Threshold |ρ|≥0.3, 63-day window |
+| **Eventos macro** | Não existem | **Broadcast de surpresas macro** | Z-score detection (threshold=1.5σ) de 8 séries FRED |
+| **Walk-forward** | Random split | **60/20/20 temporal** | Memória herdada entre splits — padrão ouro em financial ML |
+| **Staleness handling** | Não tratado | **Proxy documentado** | PRICE_UPDATE sintético após 5 dias sem evento (§2.5) |
+| **Data pipeline** | Dataset acadêmico fixo | **APIs live** | yfinance + FRED com retry e logging |
+
+### 4.2 Contribuições planejadas (backlog)
+
+> **Fonte única:** Ver [BACKLOG.md](BACKLOG.md) para o backlog completo e priorizado.
+> A tabela de contribuições planejadas vs. TGN original está consolidada lá.
+
+---
+
+## 5. Análise e Lições Aprendidas
+
+### 5.1 O problema do viés precision/recall
+
+**Diagnóstico:** Com `corr_threshold=0.3`, a maioria dos pares de ativos do S&P 500
+tem |ρ|≥0.3 — ou seja, a classe positiva é naturalmente dominante. O modelo
+aprende rapidamente a predizer "sim" para tudo (recall~97%) porque é a estratégia
+de menor risco.
+
+**Implicações para o artigo:**
+- O threshold de 0.3 é conservador para o S&P 500 (ativos altamente correlacionados)
+- Threshold de 0.5 ou 0.6 criaria um problema mais discriminante
+- Alternativa: predizer a **magnitude** da correlação (regressão) em vez de binarizar
+
+### 5.2 Focal loss não é adequada para este problema
+
+Focal loss (Lin et al., 2017) foi desenhada para object detection onde 99% dos
+anchors são background. Em link prediction financeira, o desbalanceamento é moderado
+(~60/40) e o focal loss com γ=2 suprime praticamente todo o gradiente, impedindo
+o aprendizado.
+
+### 5.3 O impacto de escalar ativos
+
+Com 10 ativos (45 pares): AUC=0.754, com 20 ativos (190 pares): AUC=0.687.
+A queda não indica falha do modelo — indica um problema mais complexo.
+O grafo esparso com 20 ativos força o modelo a discriminar melhor, o que é
+desejável para a aplicação real.
+
+### 5.4 Importância de eventos heterogêneos
+
+O v0.2 capturou **380 EARNINGS + 316 CORP_ACTION** que o v0.1 não tinha (bug tz).
+Apesar de o AUC ter caído (mais ativos = mais difícil), a riqueza do event stream
+é fundamental para a contribuição do artigo vs. TGN original.
+
+---
+
+## 6. Infraestrutura Técnica
+
+### 6.1 Ambiente
+- Python 3.x, PyTorch 2.0+, PyTorch Geometric 2.4+
+- yfinance (dados de mercado), fredapi (dados macro), arch (GARCH)
+- Windows, single GPU (CPU no momento)
+
+### 6.2 Pipeline de Dados
+```
+yfinance → prices, OHLCV, ticker_info, earnings, actions
+FRED API → 8 séries macro (DFF, VIXCLS, BAMLC0A0CM, DGS10, DGS2, CPIAUCSL, UNRATE, MANEMP)
+     ↓
+NodeFeatureBuilder → 20-dim features/day/node
+EdgeFeatureBuilder → rolling Pearson + sector edges
+EventStreamBuilder → 7 tipos de evento, merge + sort temporal
+     ↓
+TGN → memory update → GAT embedding → readout → e_t ∈ R^100
+     ↓
+LinkPredictor → BCE loss → predict ρ_{ij}(t+1)
+```
+
+### 6.3 Tamanho do Modelo
+- Parâmetros: 556,909 (fixo, independente do número de ativos)
+- Memory buffer: N × 172 (cresce com ativos, mas não é aprendido)
