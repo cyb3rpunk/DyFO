@@ -25,7 +25,11 @@ import torch.optim as optim
 
 from dyfo.config import DataConfig, DyFOConfig
 from dyfo.core.dyfo_module import DyFOModule
-from dyfo.core.edge_features import build_sector_edges, compute_rolling_correlations
+from dyfo.core.edge_features import (
+    build_sector_edges,
+    compute_dcc_garch_correlations,
+    compute_rolling_correlations,
+)
 from dyfo.core.event_stream import EventStreamBuilder, FinancialEvent, timestamp_to_float
 from dyfo.core.graph_builder import GraphBuilder
 from dyfo.core.link_prediction import (
@@ -102,9 +106,30 @@ def prepare_data(
 
     # Edges
     sector_edges = build_sector_edges(ticker_info, ticker_to_idx)
-    corr_series, corr_pairs = compute_rolling_correlations(
-        prices, window=63, threshold=config.corr_sparsify_threshold,
-    )
+
+    # Correlation method: DCC-GARCH (Engle 2002) or rolling Pearson
+    use_dcc = config.correlation_method == "dcc_garch"
+    if use_dcc:
+        logger.info("Computing DCC-GARCH correlations...")
+        # Compute full (unsparsified) DCC correlations once — expensive
+        corr_series_all, corr_pairs_all = compute_dcc_garch_correlations(
+            prices, window=config.dcc_garch_window, threshold=0.0,
+        )
+        # Sparsified version for CORRELATION_UPDATE events
+        corr_series = corr_series_all.copy()
+        for col in corr_series.columns:
+            mask = corr_series[col].abs() < config.corr_sparsify_threshold
+            corr_series.loc[mask, col] = np.nan
+        corr_series = corr_series.dropna(axis=1, how="all")
+        corr_pairs = [
+            p for p in corr_pairs_all if f"{p[0]}_{p[1]}" in corr_series.columns
+        ]
+    else:
+        logger.info("Computing rolling Pearson correlations...")
+        corr_series, corr_pairs = compute_rolling_correlations(
+            prices, window=config.rolling_corr_window,
+            threshold=config.corr_sparsify_threshold,
+        )
 
     # Event stream
     builder = GraphBuilder(config=config, tickers=tickers)
@@ -135,11 +160,13 @@ def prepare_data(
         corr_by_date[date_key][(i, j)] = rho
         corr_by_date[date_key][(j, i)] = rho
 
-    # Compute UNSPARSIFIED rolling correlations for regression labels
-    # (all pairs, no threshold — needed for continuous rho prediction)
-    corr_series_all, corr_pairs_all = compute_rolling_correlations(
-        prices, window=63, threshold=0.0,
-    )
+    # Unsparsified correlations for regression labels (continuous ρ prediction)
+    if not use_dcc:
+        # Rolling Pearson: need to compute unsparsified version separately
+        corr_series_all, corr_pairs_all = compute_rolling_correlations(
+            prices, window=config.rolling_corr_window, threshold=0.0,
+        )
+    # else: corr_series_all / corr_pairs_all already computed above
     corr_labels_by_date: Dict[int, Dict[Tuple[int, int], float]] = defaultdict(dict)
     for date in corr_series_all.index:
         date_key = int(timestamp_to_float(pd.Timestamp(date)))
@@ -202,6 +229,7 @@ def train_link_prediction(
     results.log_params({
         "task": "link_prediction",
         "mode": mode,
+        "correlation_method": config.correlation_method,
         "tickers": tickers,
         "start": start,
         "end": end,

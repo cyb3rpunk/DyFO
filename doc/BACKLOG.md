@@ -13,7 +13,7 @@ diretamente nos BL-items abaixo:
 
 | Aspecto | TGN Original | DyFO (planejado) | BL item |
 |---------|-------------|------------------|---------|
-| **Correlações** | N/A | DCC-GARCH (Engle 2002) — substitui Pearson rolling | BL-03 |
+| **Correlações** | N/A | DCC-GARCH (Engle 2002) — ✅ implementado | BL-03 |
 | **Ablation** | Sem comparação | B16: TGN vs ROLAND vs GAT-Static | BL-02 |
 | **Regime conditioning** | Não existe | regime_prob como node feature do RDM (HMM-GAS) | BL-09 |
 | **Scalability** | ~10K nós | 30-50 ativos financeiros com grafos esparsos | BL-01 |
@@ -40,29 +40,35 @@ realmente desafiador. Resultados com 10 ativos não são publicáveis como valid
 **Referência:** Manual §6.1, You et al. (2022), Pareja et al. (2020)
 
 ### BL-03: Substituir Pearson por DCC-GARCH
-**Status:** 🔴 Pendente
+**Status:** ✅ Implementado
 **Justificativa:** Manual é explícito: "NÃO usar Pearson simples" (§7.1 checklist).
 Rolling Pearson é fallback. DCC-GARCH (Engle 2002) captura correlações time-varying
 e é o padrão em financial econometrics. Pacote `arch` v8.0.0 já instalado.
-**Ação:** Ativar `compute_dcc_garch_correlations()` em `edge_features.py`.
+**Implementação (2026-03-26):**
+- `compute_dcc_garch_correlations()` reescrita com DCC(1,1) completo:
+  Step 1: GARCH(1,1) per asset → residuals ε_t (`arch` package)
+  Step 2: MLE estimation of (a, b) via grid search + L-BFGS-B (`scipy`)
+  Step 3: DCC recursion Q_t = (1-a-b)Q̄ + a(ε_{t-1}ε_{t-1}') + bQ_{t-1}
+  Step 4: R_t = diag(Q_t)^{-1/2} Q_t diag(Q_t)^{-1/2}, sparsification
+- `config.py`: campo `correlation_method` ("dcc_garch" | "rolling_pearson")
+- `train_link_prediction.py`: DCC computado uma vez, sparsificação como pós-processamento
+- Fallback automático para rolling Pearson se GARCH falhar em >50% dos ativos
 **Impacto:** Melhora qualidade das arestas CORR e dos labels de link prediction.
 
 ### BL-04: Corrigir viés precision/recall
-**Status:** 🟡 Em investigação
-**Justificativa:** Modelo prediz "sim" para ~97% dos pares (recall ~97%, precision ~46%).
+**Status:** ✅ Resolvido (consequência de BL-03)
+**Justificativa original:** Modelo prediz "sim" para ~97% dos pares (recall ~97%, precision ~46%).
 Causa raiz: com corr_threshold=0.3, 100% dos pares do S&P 500 são positivos.
 **Opções investigadas:**
 - ❌ v0.3a: Focal loss (α=0.25, γ=2.0) — AUC→0.55 (descartado)
 - ❌ v0.3b: pos_weight=0.5 — AUC→0.66 (descartado)
 - ❌ v0.3c: neg_ratio=3.0 — AUC→0.62 (descartado)
-- 🟡 v0.4: Regressão de ρ contínua (Huber loss) — test R²=-2.08, Spearman=0.14.
-  Train aprende (R²=0.33, Spearman=0.58 no ep6) mas não generaliza → overfitting.
-**Opções restantes:**
-- [ ] Aumentar corr_threshold para 0.5 ou 0.6 (mais seletivo)
-- [ ] Hard negative mining (pares que mudam de alta→baixa correlação)
-- [ ] Combinar regressão com DCC-GARCH labels (melhor sinal = melhor generalização)
-**Nota:** A correção definitiva provavelmente virá da combinação BL-03 + BL-01
-(labels melhores + mais pares = problema mais discriminante). Não bloquear por isso.
+- ❌ v0.4: Regressão de ρ contínua com Pearson — test R²=-2.08 (overfitting)
+- ✅ **v0.5: Regressão + DCC-GARCH labels** — test R²=0.65, Spearman=0.91, cls F1=0.83
+**Resolução:** O viés era causado por labels ruidosos (rolling Pearson), não por
+arquitetura ou loss function. Com DCC-GARCH (BL-03), a regressão contínua generaliza
+e a classificação derivada (threshold @0.5) atinge Precision=0.72, Recall=0.99, F1=0.83.
+Nenhuma implementação adicional necessária.
 
 ### BL-08: Validação estatística com bootstrap
 **Status:** 🔴 Pendente

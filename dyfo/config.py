@@ -42,6 +42,7 @@ class DyFOConfig:
     corr_sparsify_threshold: float = 0.3
 
     # --- Correlation ---
+    correlation_method: str = "dcc_garch"  # "rolling_pearson" or "dcc_garch"
     dcc_garch_window: int = 252
     rolling_corr_window: int = 63
 
