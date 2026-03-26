@@ -605,14 +605,38 @@ def train_link_prediction(
 
 
 if __name__ == "__main__":
-    TICKERS_20 = [
-        "AAPL", "MSFT", "GOOGL", "NVDA", "JPM", "GS", "MA",
-        "JNJ", "UNH", "AMZN", "TSLA", "PG", "KO", "XOM", "CVX",
-        "CAT", "BA", "META", "LIN", "NEE",
+    # 30 S&P 500 tickers by liquidity, covering all 11 GICS sectors (BL-01)
+    # Tech(5): AAPL MSFT GOOGL NVDA AVGO | Fin(4): JPM GS MA BRK-B
+    # Health(3): JNJ UNH LLY | Disc(3): AMZN TSLA HD | Staples(2): PG KO
+    # Energy(2): XOM CVX | Industrials(3): CAT BA RTX | Comm(3): META GOOG DIS
+    # Materials(2): LIN APD | Utilities(2): NEE DUK | Real Estate(1): PLD
+    TICKERS_30 = [
+        # Information Technology (5)
+        "AAPL", "MSFT", "NVDA", "AVGO", "CRM",
+        # Financials (4)
+        "JPM", "GS", "MA", "BRK-B",
+        # Health Care (3)
+        "JNJ", "UNH", "LLY",
+        # Consumer Discretionary (3)
+        "AMZN", "TSLA", "HD",
+        # Consumer Staples (2)
+        "PG", "KO",
+        # Energy (2)
+        "XOM", "CVX",
+        # Industrials (3)
+        "CAT", "BA", "RTX",
+        # Communication Services (3)
+        "META", "GOOGL", "DIS",
+        # Materials (2)
+        "LIN", "APD",
+        # Utilities (2)
+        "NEE", "DUK",
+        # Real Estate (1)
+        "PLD",
     ]
 
     test_metrics = train_link_prediction(
-        tickers=TICKERS_20,
+        tickers=TICKERS_30,
         start="2020-01-01",
         end="2024-12-31",
         benchmark="SPY",

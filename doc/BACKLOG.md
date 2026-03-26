@@ -16,7 +16,7 @@ diretamente nos BL-items abaixo:
 | **Correlações** | N/A | DCC-GARCH (Engle 2002) — ✅ implementado | BL-03 |
 | **Ablation** | Sem comparação | B16: TGN vs ROLAND vs GAT-Static | BL-02 |
 | **Regime conditioning** | Não existe | regime_prob como node feature do RDM (HMM-GAS) | BL-09 |
-| **Scalability** | ~10K nós | 30-50 ativos financeiros com grafos esparsos | BL-01 |
+| **Scalability** | ~10K nós | 30 ativos financeiros com grafos esparsos — ✅ implementado | BL-01 |
 | **Statistical validation** | Single run | 500-bootstrap sobre walk-forward | BL-08 |
 
 ---
@@ -24,12 +24,15 @@ diretamente nos BL-items abaixo:
 ## P0 — Crítico para o Artigo
 
 ### BL-01: Escalar para 30–50 ativos
-**Status:** 🔴 Pendente
+**Status:** ✅ Implementado (30 ativos)
 **Justificativa:** Com 10 ativos temos apenas C(10,2)=45 pares — trivial para o modelo.
 Com 30 temos 435 pares, com 50 temos 1225 — grafos mais esparsos e link prediction
 realmente desafiador. Resultados com 10 ativos não são publicáveis como validação principal.
-**Ação:** Usar S&P 500 top 30 por liquidez, cobrindo todos os setores GICS.
-**Dependência:** BL-05 (integridade de dados).
+**Implementação (2026-03-26):**
+- 30 tickers S&P 500 por liquidez, cobrindo todos os 11 setores GICS
+- v0.6: Test R²=0.628, Spearman=0.877 (degradação mínima vs N=20)
+- 435 pares, 351K events, DCC-GARCH 30/30 OK
+**Dependência:** BL-05 (integridade de dados) — ✅ satisfeita.
 
 ### BL-02: Implementar baselines (ROLAND, GAT-Static)
 **Status:** 🔴 Pendente

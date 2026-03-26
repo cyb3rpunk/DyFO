@@ -282,6 +282,61 @@ são o principal gargalo" (§5.1) está confirmada.
 |-----|---------|---------|--------|------|------------|----------|----------|---------|---------------|-------------|--------|---------|
 | 225610 | v0.4 | 20 | 10 | Huber | Rolling Pearson | 0.153 | 0.338 | -2.084 | 0.142 | 0.026 | -1.242 | 1 |
 | 123101 | **v0.5** | 20 | 10 | Huber | **DCC-GARCH** | **0.009** | **0.077** | **0.652** | **0.912** | **0.827** | **0.771** | 6 |
+| 145827 | **v0.6** | **30** | 10 | Huber | **DCC-GARCH** | **0.007** | **0.069** | **0.628** | **0.877** | 0.639 | **0.715** | 5 |
+
+---
+
+### v0.6 — Scale to 30 Assets (BL-01)
+**Run:** `link_pred_20260326_145827`
+**Data:** 2026-03-26 14:58
+
+**Modificações:**
+- **BL-01:** Escala de 20 → 30 tickers, cobrindo todos 11 setores GICS
+- Universe: AAPL, MSFT, NVDA, AVGO, CRM, JPM, GS, MA, BRK-B, JNJ, UNH, LLY,
+  AMZN, TSLA, HD, PG, KO, XOM, CVX, CAT, BA, RTX, META, GOOGL, DIS, LIN, APD,
+  NEE, DUK, PLD
+- C(30,2) = 435 pares (vs 190 do v0.5)
+- Mesmos hiperparâmetros e DCC-GARCH
+
+**Resultados:**
+
+| Métrica | Train (ep7) | Val (ep5=best) | Test |
+|---------|-------------|----------------|------|
+| MSE | 0.006 | 0.006 | **0.007** |
+| MAE | 0.059 | 0.059 | **0.069** |
+| R² | 0.693 | 0.715 | **0.628** |
+| Spearman | 0.839 | 0.894 | **0.877** |
+| cls F1(@0.5) | — | — | 0.639 |
+| cls Prec(@0.5) | — | — | 0.736 |
+| cls Recall(@0.5) | — | — | 0.567 |
+
+**Comparação v0.5 (20 ativos) → v0.6 (30 ativos):**
+
+| Métrica | v0.5 (N=20, 190 pares) | v0.6 (N=30, 435 pares) | Δ |
+|---------|----------------------|----------------------|---|
+| Test R² | 0.652 | 0.628 | -0.024 |
+| Test MAE | 0.077 | 0.069 | -0.008 (melhor) |
+| Test Spearman | 0.912 | 0.877 | -0.035 |
+| cls F1 | 0.827 | 0.639 | -0.188 |
+| DCC persistence | 0.974 | 0.972 | ~igual |
+| Events | 156K | 351K | +125% |
+| SECT edges | 24 | 64 | +167% |
+
+**Conclusão:** Resultado positivo. R² e Spearman degradaram minimamente (-4% e -4%)
+apesar de o problema ser 2.3× mais complexo (435 vs 190 pares). A regressão contínua
+continua robusta. O cls F1 caiu mais porque com 30 ativos há mais diversidade
+de correlações — o threshold fixo de 0.5 é menos adequado (precision subiu de 0.72
+para 0.74, mas recall caiu de 0.99 para 0.57, indicando que correlações inter-setor
+são mais difíceis de classificar binariamente).
+
+**Observações:**
+- DCC params muito similares: a=0.0061, b=0.9659 (persistent=0.972)
+- 30/30 GARCH fits OK, nenhum fallback
+- Epoch time ~2-4× v0.5 (76s→248s) pelo maior event stream (351K events)
+- Val R² oscilou entre epochs (0.65→0.21→0.72) — treinamento menos estável
+  que v0.5, possivelmente beneficiaria de LR schedule ou mais regularização
+- 32 SECT edges (11 setores cobertos), 435 CORR pairs
+- BA earnings fetch falhou (3 retries) — sem impacto material
 
 ---
 
