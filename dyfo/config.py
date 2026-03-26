@@ -42,11 +42,12 @@ class DyFOConfig:
     corr_sparsify_threshold: float = 0.3
 
     # --- Correlation ---
+    correlation_method: str = "dcc_garch"  # "rolling_pearson" or "dcc_garch"
     dcc_garch_window: int = 252
     rolling_corr_window: int = 63
 
     # --- Data ---
-    node_feature_dim: int = 18  # 1+1+1+11+1+1+K(3)+1 (see manual §2.2 with K=3)
+    node_feature_dim: int = 20  # 1+1+1+11+1+1+K(3)+1 = 20 (see manual §2.2 with K=3)
     num_regimes: int = 3  # K regimes from RDM
 
 

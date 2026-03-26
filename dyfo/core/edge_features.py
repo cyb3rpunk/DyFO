@@ -76,44 +76,239 @@ def compute_rolling_correlations(
     return corr_df, surviving_pairs
 
 
+def _estimate_dcc_params(
+    eps: np.ndarray,
+    Q_bar: np.ndarray,
+    max_iter: int = 100,
+) -> Tuple[float, float]:
+    """Estimate DCC(1,1) parameters (a, b) via quasi-maximum likelihood.
+
+    Two-step Engle (2002): given standardised residuals from GARCH step 1,
+    maximise the DCC log-likelihood over (a, b) with constraint a+b < 1.
+    """
+    from scipy.optimize import minimize
+
+    T, N = eps.shape
+
+    # Pre-compute outer products (reused across likelihood evaluations)
+    outer_prods = np.empty((T, N, N))
+    for t in range(T):
+        outer_prods[t] = np.outer(eps[t], eps[t])
+
+    def neg_log_lik(params):
+        a, b = params
+        if a <= 0 or b <= 0 or a + b >= 0.9999:
+            return 1e12
+
+        intercept = (1.0 - a - b) * Q_bar
+        Q_t = Q_bar.copy()
+        total_ll = 0.0
+
+        for t in range(T):
+            if t > 0:
+                Q_t = intercept + a * outer_prods[t - 1] + b * Q_t
+
+            # Normalise Q_t → R_t
+            d = np.sqrt(np.maximum(np.diag(Q_t), 1e-12))
+            R_t = Q_t / np.outer(d, d)
+            np.clip(R_t, -1.0, 1.0, out=R_t)
+            np.fill_diagonal(R_t, 1.0)
+
+            try:
+                sign, logdet = np.linalg.slogdet(R_t)
+                if sign <= 0:
+                    return 1e12
+                R_inv_e = np.linalg.solve(R_t, eps[t])
+                total_ll += logdet + eps[t] @ R_inv_e - eps[t] @ eps[t]
+            except np.linalg.LinAlgError:
+                return 1e12
+
+        return 0.5 * total_ll
+
+    # Grid search for good starting point
+    best_nll = 1e12
+    best_ab = (0.01, 0.95)
+    for a0 in [0.005, 0.01, 0.02, 0.05, 0.10]:
+        for b0 in [0.85, 0.90, 0.93, 0.95, 0.97]:
+            if a0 + b0 >= 0.999:
+                continue
+            nll = neg_log_lik((a0, b0))
+            if nll < best_nll:
+                best_nll = nll
+                best_ab = (a0, b0)
+
+    # Refine via L-BFGS-B
+    try:
+        result = minimize(
+            neg_log_lik,
+            best_ab,
+            method="L-BFGS-B",
+            bounds=[(1e-6, 0.50), (1e-6, 0.9999)],
+            options={"maxiter": max_iter, "ftol": 1e-8},
+        )
+        if result.success and result.x[0] + result.x[1] < 0.9999:
+            return float(result.x[0]), float(result.x[1])
+    except Exception:
+        pass
+
+    return best_ab
+
+
+def _dcc_recursion(
+    eps: np.ndarray,
+    Q_bar: np.ndarray,
+    a: float,
+    b: float,
+) -> List[np.ndarray]:
+    """Run DCC(1,1) forward recursion → time-varying correlation matrices R_t."""
+    T, N = eps.shape
+    intercept = (1.0 - a - b) * Q_bar
+    Q_t = Q_bar.copy()
+    R_series: List[np.ndarray] = []
+
+    for t in range(T):
+        if t > 0:
+            Q_t = intercept + a * np.outer(eps[t - 1], eps[t - 1]) + b * Q_t
+
+        d = np.sqrt(np.maximum(np.diag(Q_t), 1e-12))
+        R_t = Q_t / np.outer(d, d)
+        np.clip(R_t, -1.0, 1.0, out=R_t)
+        np.fill_diagonal(R_t, 1.0)
+        R_series.append(R_t)
+
+    return R_series
+
+
 def compute_dcc_garch_correlations(
     prices: pd.DataFrame,
     window: int = 252,
     threshold: float = 0.3,
 ) -> Tuple[pd.DataFrame, List[Tuple[str, str]]]:
-    """Compute DCC-GARCH dynamic correlations (requires `arch` package).
+    """Compute DCC-GARCH(1,1) dynamic correlations (Engle 2002).
 
-    Falls back to rolling Pearson if DCC estimation fails for a pair.
-    For large universes (N > 50), this is slow — prefer rolling correlations.
+    Two-step estimation:
+      1. Fit GARCH(1,1) per asset → standardised residuals ε_t
+      2. Estimate DCC(1,1) parameters (a, b) via quasi-MLE, then compute
+         R_t = diag(Q_t)^{-1/2} Q_t diag(Q_t)^{-1/2}  where
+         Q_t = (1-a-b) Q̄ + a (ε_{t-1} ε_{t-1}') + b Q_{t-1}
+
+    Falls back to rolling Pearson if GARCH fails for >50 % of assets.
+
+    Parameters
+    ----------
+    prices : DataFrame
+        Adjusted close, columns = tickers.
+    window : int
+        Minimum number of observations required for GARCH estimation.
+    threshold : float
+        Absolute correlation cutoff for sparsification (0 = keep all).
+
+    Returns
+    -------
+    corr_df : DataFrame
+        Index = dates, columns = "TKRA_TKRB", values = ρ_t (NaN if sparsified).
+    pairs : list of (ticker_i, ticker_j) surviving sparsification.
     """
     try:
         from arch import arch_model
     except ImportError:
-        logger.warning("arch package not installed; falling back to rolling correlations")
+        logger.warning("arch package not installed; falling back to rolling Pearson")
         return compute_rolling_correlations(prices, window=63, threshold=threshold)
 
     log_ret = np.log(prices / prices.shift(1)).dropna(how="all")
     tickers = list(log_ret.columns)
 
-    # Fit GARCH(1,1) per asset to get standardised residuals
+    # -- Step 1: GARCH(1,1) per asset -----------------------------------
+    logger.info("DCC-GARCH Step 1: Fitting GARCH(1,1) for %d assets...", len(tickers))
     std_resids: Dict[str, pd.Series] = {}
+    garch_failed = 0
+
     for ticker in tickers:
         series = log_ret[ticker].dropna() * 100  # scale for numerical stability
+        if len(series) < window:
+            logger.warning(
+                "Insufficient data for GARCH on %s (%d < %d obs)",
+                ticker, len(series), window,
+            )
+            std_resids[ticker] = (series - series.mean()) / max(series.std(), 1e-8)
+            garch_failed += 1
+            continue
         try:
-            model = arch_model(series, vol="Garch", p=1, q=1, mean="Zero", rescale=False)
+            model = arch_model(
+                series, vol="Garch", p=1, q=1, mean="Zero", rescale=False,
+            )
             res = model.fit(disp="off", show_warning=False)
             std_resids[ticker] = res.std_resid
-        except Exception:
-            logger.warning("GARCH fit failed for %s; using raw returns", ticker)
-            std_resids[ticker] = log_ret[ticker].dropna()
+        except Exception as exc:
+            logger.warning("GARCH fit failed for %s (%s); using standardised returns", ticker, exc)
+            std_resids[ticker] = (series - series.mean()) / max(series.std(), 1e-8)
+            garch_failed += 1
 
-    # Pairwise rolling correlation on standardised residuals
-    resid_df = pd.DataFrame(std_resids).dropna(how="any")
-    return compute_rolling_correlations(
-        resid_df.cumsum().apply(np.exp),  # pseudo-prices for corr
-        window=min(window, len(resid_df) // 2),
-        threshold=threshold,
+    if garch_failed > len(tickers) // 2:
+        logger.warning(
+            "GARCH failed for %d/%d assets; falling back to rolling Pearson",
+            garch_failed, len(tickers),
+        )
+        return compute_rolling_correlations(prices, window=63, threshold=threshold)
+
+    logger.info(
+        "GARCH(1,1) fitted: %d OK, %d fallback to standardised returns",
+        len(tickers) - garch_failed, garch_failed,
     )
+
+    # Align residuals (common dates, drop any NaN rows)
+    resid_df = pd.DataFrame(std_resids).dropna()
+    if len(resid_df) < window:
+        logger.warning(
+            "Insufficient aligned residuals (%d < %d); falling back to rolling Pearson",
+            len(resid_df), window,
+        )
+        return compute_rolling_correlations(prices, window=63, threshold=threshold)
+
+    eps = resid_df.values  # (T, N)
+    T, N = eps.shape
+
+    # -- Step 2: DCC parameter estimation --------------------------------
+    logger.info("DCC-GARCH Step 2: Estimating DCC(1,1) params (T=%d, N=%d)...", T, N)
+    Q_bar = np.corrcoef(eps.T)  # unconditional correlation
+
+    try:
+        a, b = _estimate_dcc_params(eps, Q_bar)
+    except Exception as exc:
+        logger.warning("DCC estimation failed (%s); using defaults a=0.01, b=0.95", exc)
+        a, b = 0.01, 0.95
+
+    logger.info("DCC params: a=%.6f, b=%.6f (persistence a+b=%.4f)", a, b, a + b)
+
+    # -- Step 3: Forward recursion → R_t ----------------------------------
+    logger.info("DCC-GARCH Step 3: Computing time-varying R_t...")
+    R_series = _dcc_recursion(eps, Q_bar, a, b)
+
+    # -- Step 4: Extract pairwise correlations ----------------------------
+    pairs: List[Tuple[str, str]] = list(combinations(tickers, 2))
+    ticker_idx = {t: i for i, t in enumerate(tickers)}
+
+    records: Dict[str, List[float]] = {}
+    for tk_a, tk_b in pairs:
+        i, j = ticker_idx[tk_a], ticker_idx[tk_b]
+        records[f"{tk_a}_{tk_b}"] = [R_t[i, j] for R_t in R_series]
+
+    corr_df = pd.DataFrame(records, index=resid_df.index)
+
+    # Sparsify
+    if threshold > 0:
+        for col in corr_df.columns:
+            mask = corr_df[col].abs() < threshold
+            corr_df.loc[mask, col] = np.nan
+
+    corr_df = corr_df.dropna(axis=1, how="all")
+    surviving_pairs = [p for p in pairs if f"{p[0]}_{p[1]}" in corr_df.columns]
+
+    logger.info(
+        "DCC-GARCH correlations: %d/%d pairs survive (|rho| >= %.2f), T=%d dates",
+        len(surviving_pairs), len(pairs), threshold, len(corr_df),
+    )
+    return corr_df, surviving_pairs
 
 
 # ---------------------------------------------------------------------------

@@ -1,14 +1,22 @@
-"""FRED adapter — downloads macroeconomic series from the Federal Reserve."""
+"""FRED adapter — downloads macroeconomic series from the Federal Reserve.
+
+All download functions include retry logic with exponential backoff for resilience
+against transient network/API failures.
+"""
 
 from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Dict, Optional
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+BACKOFF_BASE = 2.0
 
 
 def _get_api_key(api_key: Optional[str] = None) -> str:
@@ -61,11 +69,18 @@ def download_fred_series(
 
     frames: Dict[str, pd.Series] = {}
     for name, series_id in series_map.items():
-        try:
-            s = fred.get_series(series_id, observation_start=start, observation_end=end)
-            frames[name] = s
-        except Exception:
-            logger.warning("Failed to download FRED series %s (%s)", name, series_id)
+        for attempt in range(MAX_RETRIES):
+            try:
+                s = fred.get_series(series_id, observation_start=start, observation_end=end)
+                frames[name] = s
+                break
+            except Exception as e:
+                if attempt == MAX_RETRIES - 1:
+                    logger.warning("Failed to download FRED series %s (%s) after %d retries: %s", name, series_id, MAX_RETRIES, e)
+                else:
+                    wait = BACKOFF_BASE ** attempt
+                    logger.warning("FRED %s (%s) attempt %d/%d failed — retrying in %.0fs", name, series_id, attempt + 1, MAX_RETRIES, wait)
+                    time.sleep(wait)
 
     if not frames:
         return pd.DataFrame()

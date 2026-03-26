@@ -1,14 +1,38 @@
-"""yfinance adapter — downloads price history, fundamentals, and corporate actions."""
+"""yfinance adapter — downloads price history, fundamentals, and corporate actions.
+
+All download functions include retry logic with exponential backoff for resilience
+against transient network/API failures.
+"""
 
 from __future__ import annotations
 
 import logging
+import time
 from typing import Dict, List, Optional
 
 import pandas as pd
 import yfinance as yf
 
 logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+BACKOFF_BASE = 2.0  # seconds
+
+
+def _retry(fn, description: str, max_retries: int = MAX_RETRIES):
+    """Execute fn() with retries and exponential backoff."""
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            wait = BACKOFF_BASE ** attempt
+            logger.warning(
+                "%s failed (attempt %d/%d): %s — retrying in %.0fs",
+                description, attempt + 1, max_retries, e, wait,
+            )
+            time.sleep(wait)
 
 
 def download_prices(
@@ -24,13 +48,16 @@ def download_prices(
     pd.DataFrame
         Columns = tickers, index = DatetimeIndex (business-day).
     """
-    data = yf.download(
-        tickers,
-        start=start,
-        end=end,
-        interval=interval,
-        auto_adjust=True,
-        progress=False,
+    data = _retry(
+        lambda: yf.download(
+            tickers,
+            start=start,
+            end=end,
+            interval=interval,
+            auto_adjust=True,
+            progress=False,
+        ),
+        f"download_prices({len(tickers)} tickers)",
     )
     if isinstance(data.columns, pd.MultiIndex):
         prices = data["Close"]
@@ -54,11 +81,14 @@ def download_ohlcv(
     for ticker in tickers:
         try:
             tk = yf.Ticker(ticker)
-            hist = tk.history(start=start, end=end, auto_adjust=True)
+            hist = _retry(
+                lambda t=tk: t.history(start=start, end=end, auto_adjust=True),
+                f"OHLCV({ticker})",
+            )
             if not hist.empty:
                 result[ticker] = hist[["Open", "High", "Low", "Close", "Volume"]]
         except Exception:
-            logger.warning("Failed to download OHLCV for %s", ticker)
+            logger.warning("Failed to download OHLCV for %s after %d retries", ticker, MAX_RETRIES)
     return result
 
 
@@ -71,7 +101,7 @@ def get_ticker_info(tickers: List[str]) -> Dict[str, dict]:
     for ticker in tickers:
         try:
             tk = yf.Ticker(ticker)
-            raw = tk.info
+            raw = _retry(lambda t=tk: t.info, f"info({ticker})")
             info[ticker] = {
                 "sector": raw.get("sector", "Unknown"),
                 "market_cap": raw.get("marketCap"),
@@ -79,7 +109,7 @@ def get_ticker_info(tickers: List[str]) -> Dict[str, dict]:
                 "short_name": raw.get("shortName", ticker),
             }
         except Exception:
-            logger.warning("Failed to fetch info for %s", ticker)
+            logger.warning("Failed to fetch info for %s after %d retries", ticker, MAX_RETRIES)
             info[ticker] = {"sector": "Unknown", "market_cap": None, "beta": None}
     return info
 
@@ -97,11 +127,13 @@ def get_earnings_dates(
     for ticker in tickers:
         try:
             tk = yf.Ticker(ticker)
-            ed = tk.earnings_dates
+            ed = _retry(lambda t=tk: t.earnings_dates, f"earnings({ticker})")
             if ed is None or ed.empty:
                 continue
             for dt, row in ed.iterrows():
                 ts = pd.Timestamp(dt)
+                if ts.tzinfo is not None:
+                    ts = ts.tz_localize(None)
                 if start and ts < pd.Timestamp(start):
                     continue
                 if end and ts > pd.Timestamp(end):
@@ -115,8 +147,8 @@ def get_earnings_dates(
                         "surprise": row.get("Surprise(%)"),
                     }
                 )
-        except Exception:
-            logger.warning("Failed to fetch earnings dates for %s", ticker)
+        except Exception as e:
+            logger.warning("Failed to fetch earnings dates for %s after %d retries: %s", ticker, MAX_RETRIES, e)
     if not rows:
         return pd.DataFrame(columns=["ticker", "date", "eps_estimate", "eps_actual", "surprise"])
     return pd.DataFrame(rows)
@@ -135,33 +167,37 @@ def get_corporate_actions(
     for ticker in tickers:
         try:
             tk = yf.Ticker(ticker)
-            actions = tk.actions
+            actions = _retry(lambda t=tk: t.actions, f"actions({ticker})")
             if actions is None or actions.empty:
                 continue
             for dt, row in actions.iterrows():
                 ts = pd.Timestamp(dt)
+                if ts.tzinfo is not None:
+                    ts = ts.tz_localize(None)
                 if ts < pd.Timestamp(start) or ts > pd.Timestamp(end):
                     continue
-                if row.get("Stock Splits", 0) != 0:
+                splits = row.get("Stock Splits")
+                dividends = row.get("Dividends")
+                if splits is not None and splits != 0:
                     rows.append(
                         {
                             "ticker": ticker,
                             "date": ts,
                             "action_type": "SPLIT",
-                            "value": row["Stock Splits"],
+                            "value": splits,
                         }
                     )
-                if row.get("Dividends", 0) > 0:
+                if dividends is not None and dividends > 0:
                     rows.append(
                         {
                             "ticker": ticker,
                             "date": ts,
                             "action_type": "DIVIDEND",
-                            "value": row["Dividends"],
+                            "value": dividends,
                         }
                     )
-        except Exception:
-            logger.warning("Failed to fetch actions for %s", ticker)
+        except Exception as e:
+            logger.warning("Failed to fetch actions for %s after %d retries: %s", ticker, MAX_RETRIES, e)
     if not rows:
         return pd.DataFrame(columns=["ticker", "date", "action_type", "value"])
     return pd.DataFrame(rows)
