@@ -21,10 +21,12 @@ BACKOFF_BASE = 2.0  # seconds
 
 def _retry(fn, description: str, max_retries: int = MAX_RETRIES):
     """Execute fn() with retries and exponential backoff."""
+    last_exc = None
     for attempt in range(max_retries):
         try:
             return fn()
         except Exception as e:
+            last_exc = e
             if attempt == max_retries - 1:
                 raise
             wait = BACKOFF_BASE ** attempt
@@ -33,6 +35,52 @@ def _retry(fn, description: str, max_retries: int = MAX_RETRIES):
                 description, attempt + 1, max_retries, e, wait,
             )
             time.sleep(wait)
+
+
+def _fetch_earnings_for_ticker(
+    ticker: str,
+) -> Optional[pd.DataFrame]:
+    """Fetch earnings_dates with a fresh Ticker each attempt (bypass yfinance cache)."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            tk = yf.Ticker(ticker)
+            ed = tk.earnings_dates
+            if ed is not None and not ed.empty:
+                return ed
+            return None
+        except Exception as e:
+            if attempt == MAX_RETRIES - 1:
+                raise
+            wait = BACKOFF_BASE ** attempt
+            logger.warning(
+                "earnings(%s) failed (attempt %d/%d): %s — retrying in %.0fs",
+                ticker, attempt + 1, MAX_RETRIES, e, wait,
+            )
+            time.sleep(wait)
+    return None
+
+
+def _normalize_earnings_columns(ed: pd.DataFrame) -> pd.DataFrame:
+    """Normalize yfinance earnings_dates column names across API versions.
+
+    Known variations:
+    - 'EPS Estimate' / 'epsEstimate' / 'eps_estimate'
+    - 'Reported EPS' / 'reportedEPS' / 'reported_eps'
+    - 'Surprise(%)' / 'epsSurprise' / 'surprise_pct'
+    - Index may be named 'Earnings Date' or 'earningsDate'
+    """
+    col_map = {}
+    for col in ed.columns:
+        cl = col.lower().replace(" ", "").replace("_", "")
+        if cl in ("epsestimate", "eps_estimate"):
+            col_map[col] = "EPS Estimate"
+        elif cl in ("reportedeps", "reported_eps"):
+            col_map[col] = "Reported EPS"
+        elif cl in ("surprise(%)", "epssurprise", "surprise_pct", "surprisepct", "surprise"):
+            col_map[col] = "Surprise(%)"
+    if col_map:
+        ed = ed.rename(columns=col_map)
+    return ed
 
 
 def download_prices(
@@ -126,10 +174,10 @@ def get_earnings_dates(
     rows = []
     for ticker in tickers:
         try:
-            tk = yf.Ticker(ticker)
-            ed = _retry(lambda t=tk: t.earnings_dates, f"earnings({ticker})")
-            if ed is None or ed.empty:
+            ed = _fetch_earnings_for_ticker(ticker)
+            if ed is None:
                 continue
+            ed = _normalize_earnings_columns(ed)
             for dt, row in ed.iterrows():
                 ts = pd.Timestamp(dt)
                 if ts.tzinfo is not None:
