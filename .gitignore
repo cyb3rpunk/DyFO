@@ -8,6 +8,7 @@ build/
 *.pth
 data/raw/
 data/processed/
+data/*.csv
 logs/
 results/
 *.log

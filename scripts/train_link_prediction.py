@@ -28,6 +28,7 @@ from dyfo.core.dyfo_module import DyFOModule
 from dyfo.core.edge_features import (
     build_sector_edges,
     compute_dcc_garch_correlations,
+    compute_factor_edges,
     compute_rolling_correlations,
 )
 from dyfo.core.event_stream import EventStreamBuilder, FinancialEvent, timestamp_to_float
@@ -107,6 +108,21 @@ def prepare_data(
     # Edges
     sector_edges = build_sector_edges(ticker_info, ticker_to_idx)
 
+    # Factor edges (Fama-French 5)
+    from dyfo.data.ff_adapter import download_ff5_factors
+    logger.info("Downloading Fama-French 5 factors...")
+    ff5_factors = download_ff5_factors(start, end)
+    if ff5_factors is not None:
+        # Use only the 5 factors, not RF
+        ff5_returns = ff5_factors[['Mkt-RF', 'SMB', 'HML', 'RMW', 'CMA']]
+        factor_edges = compute_factor_edges(
+            prices, ff5_returns, ticker_to_idx,
+            loading_window=252, threshold=0.5,
+        )
+    else:
+        logger.warning("FF5 factors unavailable; skipping FACT edges")
+        factor_edges = []
+
     # Correlation method: DCC-GARCH (Engle 2002) or rolling Pearson
     use_dcc = config.correlation_method == "dcc_garch"
     if use_dcc:
@@ -133,7 +149,7 @@ def prepare_data(
 
     # Event stream
     builder = GraphBuilder(config=config, tickers=tickers)
-    graph = builder.build_initial_graph(sector_edges=sector_edges, supply_chain_edges=[], factor_edges=[])
+    graph = builder.build_initial_graph(sector_edges=sector_edges, supply_chain_edges=[], factor_edges=factor_edges)
 
     esb = EventStreamBuilder(ticker_to_idx)
     price_events = esb.build_price_events(prices, volumes)

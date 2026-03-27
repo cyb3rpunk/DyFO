@@ -257,7 +257,19 @@ def compute_dcc_garch_correlations(
     )
 
     # Align residuals (common dates, drop any NaN rows)
-    resid_df = pd.DataFrame(std_resids).dropna()
+    # First, drop tickers with insufficient data (e.g. failed downloads)
+    valid_tickers = [t for t in tickers if len(std_resids[t].dropna()) >= window // 2]
+    dropped = set(tickers) - set(valid_tickers)
+    if dropped:
+        logger.warning(
+            "Dropping %d tickers with insufficient residuals from DCC: %s",
+            len(dropped), sorted(dropped),
+        )
+    if len(valid_tickers) < 2:
+        logger.warning("Fewer than 2 valid tickers for DCC; falling back to rolling Pearson")
+        return compute_rolling_correlations(prices, window=63, threshold=threshold)
+
+    resid_df = pd.DataFrame({t: std_resids[t] for t in valid_tickers}).dropna()
     if len(resid_df) < window:
         logger.warning(
             "Insufficient aligned residuals (%d < %d); falling back to rolling Pearson",
@@ -265,6 +277,8 @@ def compute_dcc_garch_correlations(
         )
         return compute_rolling_correlations(prices, window=63, threshold=threshold)
 
+    # Update tickers list to only valid ones
+    tickers = valid_tickers
     eps = resid_df.values  # (T, N)
     T, N = eps.shape
 
