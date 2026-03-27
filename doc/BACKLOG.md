@@ -97,10 +97,15 @@ adapters (yfinance + FRED). Logging detalhado de falhas.
 **Status:** ✅ Implementado (grid search -2.0 a 2.0 em 41 passos)
 
 ### BL-11: Factor edges (FACT / Fama-French)
-**Status:** 🔴 Pendente (código implementado, dados não carregados)
+**Status:** ✅ Implementado
 **Justificativa:** OLS loading distance conecta ativos com exposição similar a fatores.
-`compute_factor_edges()` existe em `edge_features.py` mas nunca foi chamado com dados reais.
-**Ação:** Baixar FF5 factors de Ken French website, alimentar pipeline.
+**Implementação (2026-03-27):**
+- Novo módulo `dyfo/data/ff_adapter.py`: download/cache dos fatores diários FF5 (2×3) da Ken French Data Library
+- `compute_factor_edges()` ativado no pipeline: OLS loadings (janela=252d), threshold L2<0.50
+- 22 pares FACT → 44 arestas bidirecionais no grafo estático (total: 108 edges vs 64 sem FACT)
+- Edge features = |β_i − β_j| (dim=5, diferença absoluta dos 5 loadings fatoriais)
+- Hardening do DCC-GARCH: filtra tickers com resíduos insuficientes antes do Step 2
+- v0.7: Test R²=0.806 (+0.178 vs v0.6), Spearman=0.931 (+0.054), MAE=0.049 (−0.020)
 
 ---
 
@@ -148,15 +153,15 @@ do MATTS. A evaluation downstream final é Sharpe ratio / CVaR do portfólio.
 ## Sequência de Execução Recomendada
 
 ```
-BL-03 (DCC-GARCH)    ← Melhora labels e arestas
+BL-03 (DCC-GARCH)    ← Melhora labels e arestas           ✅
     ↓
-BL-01 (30+ ativos)   ← Problema discriminante + publicável
+BL-01 (30+ ativos)   ← Problema discriminante + publicável  ✅
+    ↓
+BL-11 (FACT edges)   ← Enriquece grafo heterogêneo          ✅
     ↓
 BL-02 (baselines)    ← Ablation B16 — core do paper
     ↓
 BL-08 (bootstrap)    ← Robustez estatística
-    ↓
-BL-11 (FACT edges)   ← Enriquece grafo (nice-to-have para paper)
 ```
 
 BL-04 (viés) resolve-se como consequência de BL-03 + BL-01.
