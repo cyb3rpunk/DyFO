@@ -148,6 +148,18 @@ de treinamento pode ser proibitivo.
 do MATTS. A evaluation downstream final é Sharpe ratio / CVaR do portfólio.
 **Dependência:** Módulos 3-5 do MATTS.
 
+### BL-16: Report com gráficos e visualização do grafo/ontologia
+**Status:** 🔴 Pendente
+**Justificativa:** Gerar relatório visual com:
+- Curvas de loss (train/val) e métricas (R², Spearman, MAE) por época
+- Visualização do grafo heterogêneo (nós=ativos, arestas=CORR/SECT/FACT/SUPL com cores distintas)
+- Heatmap da matriz de correlação DCC-GARCH
+- Distribuição dos edge features e node features
+- Diagrama da ontologia financeira (tipos de nó/aresta)
+**Ação:** Script `scripts/plot_results.py` (já existe stub) + biblioteca de visualização
+(NetworkX/matplotlib para grafo, seaborn para heatmaps, Plotly opcional para interativo).
+**Dependência:** Nenhuma (pode rodar sobre resultados existentes).
+
 ---
 
 ## Sequência de Execução Recomendada
@@ -181,3 +193,4 @@ BL-04 (viés) resolve-se como consequência de BL-03 + BL-01.
 | BL-10 | §2.3 | — | TAGN 2026 |
 | BL-11 | §2.3 | — | Korangi 2024 |
 | BL-12 | §2.5 | — | GAP-TGN 2026 |
+| BL-16 | — | — | — |
