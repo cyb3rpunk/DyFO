@@ -276,13 +276,14 @@ são o principal gargalo" (§5.1) está confirmada.
 | 205536 | v0.3b | 20 | 8 | BCE(pw=0.5) | 2.0 | 0.659 | 0.618 | 0.455 | 0.988 | 0.648 | 3 |
 | 213010 | v0.3c | 20 | 8 | BCE | 3.0 | 0.619 | 0.596 | 0.439 | 0.970 | 0.709 | 2 |
 
-### 3.2 Regressão (v0.4–v0.5)
+### 3.2 Regressão (v0.4–v0.7)
 
-| Run | Version | Tickers | Epochs | Loss | Corr Method | Test MSE | Test MAE | Test R² | Test Spearman | Test cls F1 | Val R² | Best Ep |
-|-----|---------|---------|--------|------|------------|----------|----------|---------|---------------|-------------|--------|---------|
-| 225610 | v0.4 | 20 | 10 | Huber | Rolling Pearson | 0.153 | 0.338 | -2.084 | 0.142 | 0.026 | -1.242 | 1 |
-| 123101 | **v0.5** | 20 | 10 | Huber | **DCC-GARCH** | **0.009** | **0.077** | **0.652** | **0.912** | **0.827** | **0.771** | 6 |
-| 145827 | **v0.6** | **30** | 10 | Huber | **DCC-GARCH** | **0.007** | **0.069** | **0.628** | **0.877** | 0.639 | **0.715** | 5 |
+| Run | Version | Tickers | Epochs | Loss | Corr Method | FACT | Test MSE | Test MAE | Test R² | Test Spearman | Test cls F1 | Val R² | Best Ep |
+|-----|---------|---------|--------|------|------------|------|----------|----------|---------|---------------|-------------|--------|---------|
+| 225610 | v0.4 | 20 | 10 | Huber | Rolling Pearson | 0 | 0.153 | 0.338 | -2.084 | 0.142 | 0.026 | -1.242 | 1 |
+| 123101 | **v0.5** | 20 | 10 | Huber | **DCC-GARCH** | 0 | **0.009** | **0.077** | **0.652** | **0.912** | **0.827** | **0.771** | 6 |
+| 145827 | **v0.6** | **30** | 10 | Huber | **DCC-GARCH** | 0 | **0.007** | **0.069** | **0.628** | **0.877** | 0.639 | **0.715** | 5 |
+| 083335 | **v0.7** | **30** | 10 | Huber | **DCC-GARCH** | **44** | **0.004** | **0.049** | **0.806** | **0.931** | 0.688 | **0.859** | 10 |
 
 ---
 
@@ -340,6 +341,76 @@ são mais difíceis de classificar binariamente).
 
 ---
 
+### v0.7 — FACT Edges: Fama-French 5 Factor Co-Movement (BL-11)
+**Run:** `link_pred_20260327_083335`
+**Data:** 2026-03-27 08:33
+
+**Modificações:**
+- **BL-11 implementado:** FACT edges ativados no grafo heterogêneo
+  - Novo módulo `dyfo/data/ff_adapter.py`: download/cache dos fatores diários FF5 (2×3)
+    da Ken French Data Library (retry com backoff, cache local em `data/ff5_daily.csv`)
+  - `compute_factor_edges()` integrado no pipeline de treinamento
+  - OLS loadings (janela=252d): $r_i = \alpha + \beta \cdot F + \varepsilon$
+  - Aresta FACT criada se $\|\beta_i - \beta_j\|_2 < 0.50$
+  - Edge features = $|\beta_i - \beta_j|$ (dim=5, diferença absoluta dos 5 loadings)
+  - 22 pares → 44 arestas bidirecionais
+- **Hardening DCC-GARCH:** filtra tickers com resíduos insuficientes antes do Step 2,
+  fallback gracioso para rolling Pearson se < 2 tickers válidos
+- Grafo estático: 108 edges (SECT=64, FACT=44) vs 64 edges (SECT=64) no v0.6
+
+**Configuração:**
+- Tickers: 30 (mesmos do v0.6)
+- Período: 2020-01-01 → 2024-12-31
+- Epochs: 10, LR: 1e-3, weight_decay: 1e-4
+- Loss: Huber (SmoothL1), mode: regression
+- DCC-GARCH + FACT edges (FF5, threshold L2 < 0.50)
+
+**Resultados:**
+
+| Métrica | Train (ep10) | Val (ep10=best) | Test |
+|---------|-------------|----------------|------|
+| MSE | 0.004 | 0.003 | **0.004** |
+| MAE | 0.047 | 0.040 | **0.049** |
+| R² | 0.801 | 0.859 | **0.806** |
+| Spearman | 0.911 | 0.947 | **0.931** |
+| cls F1(@0.5) | — | — | 0.688 |
+| cls Prec(@0.5) | — | — | 0.781 |
+| cls Recall(@0.5) | — | — | 0.619 |
+
+- Best epoch: 10/10 (modelo ainda melhorando — sugere benefício de mais epochs)
+- DCC params idênticos ao v0.6: a=0.0061, b=0.9659 (persistence=0.972)
+- 351K events (inalterado — FACT edges são estáticos, não geram eventos)
+- Epoch time: 96s→170s (aumento gradual com complexidade da mensagem)
+
+**Comparação v0.6 (sem FACT) → v0.7 (com FACT):**
+
+| Métrica | v0.6 (FACT=0) | v0.7 (FACT=44) | Δ |
+|---------|-------------|----------------|---|
+| Test R² | 0.628 | **0.806** | **+0.178** |
+| Test MAE | 0.069 | **0.049** | **−0.020** |
+| Test Spearman | 0.877 | **0.931** | **+0.054** |
+| Test MSE | 0.007 | **0.004** | −0.003 |
+| cls F1 | 0.639 | 0.688 | +0.049 |
+| Val R² | 0.715 | **0.859** | **+0.144** |
+| Best epoch | 5/10 | 10/10 | Ainda aprendendo |
+| Static edges | 64 | **108** | +44 (FACT) |
+
+**Conclusão:** ✅ **Melhoria significativa.** FACT edges adicionam sinal estrutural
+relevante: R² salta de 0.63 para **0.81** — o modelo agora explica 81% da variância
+das correlações condicionais futuras. Spearman=0.93 confirma ranking quase perfeito.
+
+**Análise do impacto:**
+- FACT edges capturam co-movimento latente via exposição fatorial (Mkt-RF, SMB, HML,
+  RMW, CMA) — informação complementar às correlações DCC e setores GICS
+- A topologia mais rica (108 vs 64 edges) permite ao GAT propagar informação por
+  caminhos adicionais, melhorando as representações de nós periféricos
+- A melhoria é puramente topológica (mesmos dados, mesma arquitetura, mesmos labels)
+  — evidência forte de que a heterogeneidade do grafo é informativa
+- Best epoch=10 indica que o modelo não convergiu; mais epochs ou LR schedule
+  poderiam extrair ganho adicional
+
+---
+
 ## 4. Melhorias Implementadas vs. TGN Original (Rossi et al., 2020)
 
 ### 4.1 Contribuições já implementadas
@@ -348,7 +419,7 @@ são mais difíceis de classificar binariamente).
 |---------|-------------|--------------|---------------|
 | **Domínio** | Social/Wikipedia (genérico) | Financeiro (não-estacionário) | Mercados têm regime shifts, sazonalidade, correlações variantes |
 | **Tipos de evento** | 1 (interação genérica) | **7 tipos heterogêneos** | PRICE_UPDATE, EARNINGS, FED_DECISION, CREDIT, CORP_ACTION, CORR_UPDATE, MACRO — cada um com features especializadas |
-| **Tipos de aresta** | 1 (homogêneo) | **4 tipos heterogêneos** | CORR, SECT, SUPL, FACT — edge type embedding aprendido (dim=16) |
+| **Tipos de aresta** | 1 (homogêneo) | **4 tipos heterogêneos** | CORR (DCC-GARCH), SECT (GICS), SUPL (stub), FACT (FF5 co-movement — ✅ v0.7) — edge type embedding aprendido (dim=16) |
 | **Node features** | Estáticas ou ausentes | **20-dim dinâmicas** | Retorno, vol, beta, setor, mcap, drawdown, regime_prob, vol_norm — atualizadas diariamente |
 | **Correlações** | Não aplicável | **DCC-GARCH(1,1) (Engle 2002)** | Two-step: GARCH(1,1) per asset + DCC MLE; Q_t = (1-a-b)Q̄ + a(εε') + bQ_{t-1} |
 | **Eventos macro** | Não existem | **Broadcast de surpresas macro** | Z-score detection (threshold=1.5σ) de 8 séries FRED |
