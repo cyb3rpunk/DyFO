@@ -149,16 +149,19 @@ do MATTS. A evaluation downstream final é Sharpe ratio / CVaR do portfólio.
 **Dependência:** Módulos 3-5 do MATTS.
 
 ### BL-16: Report com gráficos e visualização do grafo/ontologia
-**Status:** 🔴 Pendente
+**Status:** ✅ Implementado (parcial, foco em curvas de treino)
 **Justificativa:** Gerar relatório visual com:
 - Curvas de loss (train/val) e métricas (R², Spearman, MAE) por época
 - Visualização do grafo heterogêneo (nós=ativos, arestas=CORR/SECT/FACT/SUPL com cores distintas)
 - Heatmap da matriz de correlação DCC-GARCH
 - Distribuição dos edge features e node features
 - Diagrama da ontologia financeira (tipos de nó/aresta)
-**Ação:** Script `scripts/plot_results.py` (já existe stub) + biblioteca de visualização
-(NetworkX/matplotlib para grafo, seaborn para heatmaps, Plotly opcional para interativo).
-**Dependência:** Nenhuma (pode rodar sobre resultados existentes).
+**Implementação (2026-04-06):**
+- `scripts/plot_results.py` corrigido para suportar runs de regressão e classificação
+- Plot dinâmico por modo (métrica principal/auxiliar, MAE para regressão, métricas de classificação)
+- Painel-resumo de métricas consolidado e geração validada de `training_results.png`
+**Escopo restante (opcional):** visualização de ontologia/grafo/heatmap avançado pode evoluir em item dedicado.
+**Dependência:** Nenhuma (base funcional entregue).
 
 ### BL-17: Diagnóstico de instabilidade de treino (R²)
 **Status:** 🟡 Em andamento
@@ -170,13 +173,13 @@ mesmo com recuperação posterior. Isso reduz previsibilidade do treinamento e d
 - Definir critérios objetivos de estabilidade para promoção de configuração (ex.: sem colapso >2 épocas)
 
 ### BL-18: Corrigir `plot_results.py` para regressão e classificação
-**Status:** 🟡 Em andamento
+**Status:** ✅ Implementado
 **Justificativa:** O script de visualização assume métricas de classificação (`auc`, `f1`, etc.) e quebra
 em runs de regressão (`KeyError: 'auc'`), bloqueando parte do BL-16.
-**Ação (2026-04):**
-- Tornar o plot condicional ao modo (regressão: R²/MAE/Spearman; classificação: AUC/F1/Precision/Recall)
-- Atualizar painel de resumo para exibir métricas corretas por modo
-- Validar com pelo menos 1 run de regressão e 1 de classificação
+**Implementação (2026-04-06):**
+- Plot condicional por modo implementado (regressão: R²/MAE/Spearman; classificação: AUC/F1/Precision/Recall)
+- Painel de resumo atualizado para métricas disponíveis em cada modo
+- Validação executada em run de regressão sem `KeyError`
 
 ### BL-19: Estabilização via gradient clipping + LR scheduler
 **Status:** 🟡 Implementado, em validação
