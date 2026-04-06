@@ -160,6 +160,54 @@ do MATTS. A evaluation downstream final é Sharpe ratio / CVaR do portfólio.
 (NetworkX/matplotlib para grafo, seaborn para heatmaps, Plotly opcional para interativo).
 **Dependência:** Nenhuma (pode rodar sobre resultados existentes).
 
+### BL-17: Diagnóstico de instabilidade de treino (R²)
+**Status:** 🟡 Em andamento
+**Justificativa:** Em alguns runs houve colapso temporário de validação (R² negativo em épocas intermediárias)
+mesmo com recuperação posterior. Isso reduz previsibilidade do treinamento e dificulta comparar variantes.
+**Ação (2026-04):**
+- Consolidar análise dos runs recentes (v0.7 e pós-v0.7) com foco em curvas por época (loss, R², Spearman, LR)
+- Registrar hipóteses de causa (LR alto efetivo, oscilação por mini-batch temporal, pouca paciência)
+- Definir critérios objetivos de estabilidade para promoção de configuração (ex.: sem colapso >2 épocas)
+
+### BL-18: Corrigir `plot_results.py` para regressão e classificação
+**Status:** 🟡 Em andamento
+**Justificativa:** O script de visualização assume métricas de classificação (`auc`, `f1`, etc.) e quebra
+em runs de regressão (`KeyError: 'auc'`), bloqueando parte do BL-16.
+**Ação (2026-04):**
+- Tornar o plot condicional ao modo (regressão: R²/MAE/Spearman; classificação: AUC/F1/Precision/Recall)
+- Atualizar painel de resumo para exibir métricas corretas por modo
+- Validar com pelo menos 1 run de regressão e 1 de classificação
+
+### BL-19: Estabilização via gradient clipping + LR scheduler
+**Status:** 🟡 Implementado, em validação
+**Justificativa:** Configuração adicionada no treino para mitigar oscilações e melhorar convergência.
+**Implementação (2026-04-06):**
+- `grad_clip_enabled` e `grad_clip_max_norm` expostos em `train_link_prediction.py`
+- `ReduceLROnPlateau` integrado (fator, paciência, threshold, cooldown, min_lr configuráveis)
+- Histórico expandido com `lr` e `val_score`; persistência de `scheduler_state` no checkpoint
+- Script `scripts/ab_test_bl19_short.py` criado para A/B rápido (baseline vs scheduler)
+**Evidência inicial:** A/B curto (10 tickers, 3 épocas) aumentou `best_val_score`, mas piorou métricas de teste
+(R² e Spearman). Resultado não conclusivo para adoção final sem experimento completo.
+
+### BL-20: A/B completo de robustez (30 ativos, múltiplas seeds)
+**Status:** 🔴 Pendente
+**Justificativa:** O A/B curto da BL-19 é útil para triagem, mas insuficiente para decisão de produção.
+**Ação:**
+- Rodar A/B com 30 ativos, 10-15 épocas e pelo menos 3 seeds fixas
+- Reportar média e desvio de Test R², Spearman, MAE e melhor época
+- Promover configuração vencedora para default apenas se ganho consistente no teste
+**Dependência:** BL-19.
+
+### BL-21: Gate de regressão para preservar baseline v0.7
+**Status:** 🔴 Pendente
+**Justificativa:** v0.7 atingiu referência forte (Test R²=0.806, Spearman=0.931). Mudanças novas
+precisam de proteção explícita contra regressão de desempenho.
+**Ação:**
+- Definir baseline oficial (run/config/dados) e registrar no log experimental
+- Criar checklist de aceitação mínima para novas mudanças (ex.: não degradar além de tolerância definida)
+- Exigir comparação lado a lado com v0.7 antes de consolidar alterações de treino
+**Dependência:** BL-17 e BL-20.
+
 ---
 
 ## Sequência de Execução Recomendada
@@ -194,3 +242,8 @@ BL-04 (viés) resolve-se como consequência de BL-03 + BL-01.
 | BL-11 | §2.3 | — | Korangi 2024 |
 | BL-12 | §2.5 | — | GAP-TGN 2026 |
 | BL-16 | — | — | — |
+| BL-17 | — | — | — |
+| BL-18 | — | — | — |
+| BL-19 | — | — | — |
+| BL-20 | — | — | — |
+| BL-21 | — | — | — |

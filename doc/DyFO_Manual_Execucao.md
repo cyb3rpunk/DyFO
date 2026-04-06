@@ -94,6 +94,8 @@ Configuracao padrao atual do script:
 - Modo: regressao de correlacao (`mode="regression"`)
 - Correlacao: DCC-GARCH (`correlation_method="dcc_garch"`)
 - Epocas: 10, com early stopping
+- Gradient clipping: habilitado (`grad_clip_enabled=True`, `grad_clip_max_norm=1.0`)
+- Scheduler: ReduceLROnPlateau habilitado (`factor=0.5`, `patience=2`, `min_lr=1e-6`)
 - Split walk-forward: 60/20/20
 
 ### 5.4 Plot de metricas de treino

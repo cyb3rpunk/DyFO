@@ -231,6 +231,14 @@ def train_link_prediction(
     early_stopping_patience: int = 5,
     weight_decay: float = 1e-4,
     pos_weight: float = 0.5,
+    grad_clip_enabled: bool = True,
+    grad_clip_max_norm: float = 1.0,
+    scheduler_enabled: bool = True,
+    scheduler_factor: float = 0.5,
+    scheduler_patience: int = 2,
+    scheduler_threshold: float = 1e-4,
+    scheduler_min_lr: float = 1e-6,
+    scheduler_cooldown: int = 0,
     mode: str = "regression",
 ):
     """Full training pipeline for link prediction pre-training."""
@@ -255,6 +263,14 @@ def train_link_prediction(
         "neg_ratio": neg_ratio,
         "weight_decay": weight_decay,
         "pos_weight": pos_weight,
+        "grad_clip_enabled": grad_clip_enabled,
+        "grad_clip_max_norm": grad_clip_max_norm,
+        "scheduler_enabled": scheduler_enabled,
+        "scheduler_factor": scheduler_factor,
+        "scheduler_patience": scheduler_patience,
+        "scheduler_threshold": scheduler_threshold,
+        "scheduler_min_lr": scheduler_min_lr,
+        "scheduler_cooldown": scheduler_cooldown,
         "memory_dim": config.memory_dim,
         "embedding_dim": config.embedding_dim,
     })
@@ -309,6 +325,27 @@ def train_link_prediction(
     # Optimise TGN encoder + decoder jointly
     all_params = list(module.parameters()) + list(decoder.parameters())
     optimizer = optim.Adam(all_params, lr=lr, weight_decay=weight_decay)
+    scheduler = None
+    if scheduler_enabled:
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="max",
+            factor=scheduler_factor,
+            patience=scheduler_patience,
+            threshold=scheduler_threshold,
+            cooldown=scheduler_cooldown,
+            min_lr=scheduler_min_lr,
+        )
+        logger.info(
+            "LR scheduler enabled: ReduceLROnPlateau(factor=%.3f, patience=%d, threshold=%g, cooldown=%d, min_lr=%g)",
+            scheduler_factor,
+            scheduler_patience,
+            scheduler_threshold,
+            scheduler_cooldown,
+            scheduler_min_lr,
+        )
+    else:
+        logger.info("LR scheduler disabled")
 
     # Static graph info
     edge_index = data["graph"].get_full_edge_index()
@@ -414,7 +451,8 @@ def train_link_prediction(
 
                 optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
+                if grad_clip_enabled:
+                    torch.nn.utils.clip_grad_norm_(all_params, max_norm=grad_clip_max_norm)
                 optimizer.step()
                 module.encoder.memory = module.encoder.memory.detach()
             else:
@@ -467,7 +505,7 @@ def train_link_prediction(
     best_val_score = -float("inf")  # higher is better: R² for regression, AUC for classification
     best_epoch = 0
     patience_counter = 0
-    history = {"train": [], "val": []}
+    history = {"train": [], "val": [], "lr": [], "val_score": []}
     score_key = "r_squared" if is_regression else "auc"
 
     for epoch in range(1, num_epochs + 1):
@@ -489,6 +527,9 @@ def train_link_prediction(
 
         history["train"].append(train_metrics)
         history["val"].append(val_metrics)
+        prev_lr = optimizer.param_groups[0]["lr"]
+        history["lr"].append(prev_lr)
+        history["val_score"].append(val_metrics[score_key])
 
         if is_regression:
             logger.info(
@@ -507,6 +548,18 @@ def train_link_prediction(
 
         # Track best
         val_score = val_metrics[score_key]
+        if scheduler is not None:
+            scheduler.step(val_score)
+            new_lr = optimizer.param_groups[0]["lr"]
+            if new_lr < prev_lr:
+                logger.info(
+                    "  -> LR reduced by scheduler: %.6g -> %.6g (val %s=%.4f)",
+                    prev_lr,
+                    new_lr,
+                    score_key,
+                    val_score,
+                )
+
         if val_score > best_val_score:
             best_val_score = val_score
             best_epoch = epoch
@@ -516,6 +569,7 @@ def train_link_prediction(
                 "module_state": module.state_dict(),
                 "decoder_state": decoder.state_dict(),
                 "optimizer_state": optimizer.state_dict(),
+                "scheduler_state": scheduler.state_dict() if scheduler is not None else None,
                 "val_metrics": val_metrics,
             }, results.run_dir / "best_model.pt")
             logger.info("  -> New best model saved (val %s=%.4f)", score_key, best_val_score)
@@ -588,6 +642,7 @@ def train_link_prediction(
     results.log_metrics({
         "best_epoch": best_epoch,
         f"best_val_{score_key}": best_val_score,
+        "final_lr": optimizer.param_groups[0]["lr"],
         **{f"test_{k}": v for k, v in test_metrics.items()},
     })
 
@@ -663,5 +718,13 @@ if __name__ == "__main__":
         early_stopping_patience=5,
         weight_decay=1e-4,
         pos_weight=1.0,
+        grad_clip_enabled=True,
+        grad_clip_max_norm=1.0,
+        scheduler_enabled=True,
+        scheduler_factor=0.5,
+        scheduler_patience=2,
+        scheduler_threshold=1e-4,
+        scheduler_min_lr=1e-6,
+        scheduler_cooldown=0,
         mode="regression",
     )
