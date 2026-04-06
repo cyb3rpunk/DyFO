@@ -182,28 +182,31 @@ em runs de regressão (`KeyError: 'auc'`), bloqueando parte do BL-16.
 - Validação executada em run de regressão sem `KeyError`
 
 ### BL-19: Estabilização via gradient clipping + LR scheduler
-**Status:** 🟡 Implementado e validado em triagem (não promovido para default)
+**Status:** 🟡 Implementado e reavaliado no BL-20 (não promovido para default)
 **Justificativa:** Configuração adicionada no treino para mitigar oscilações e melhorar convergência.
 **Implementação (2026-04-06):**
 - `grad_clip_enabled` e `grad_clip_max_norm` expostos em `train_link_prediction.py`
 - `ReduceLROnPlateau` integrado (fator, paciência, threshold, cooldown, min_lr configuráveis)
 - Histórico expandido com `lr` e `val_score`; persistência de `scheduler_state` no checkpoint
-- Script `scripts/ab_test_bl19_short.py` criado para A/B rápido (baseline vs scheduler)
-**Validação de triagem (2026-04-06):**
-- A/B #1 (`results/ab_bl19_short_20260406_155329.json`): scheduler melhorou `best_val_score` (+0.0828),
-    mas degradou teste (`R²` -0.1786, `Spearman` -0.0624, `MAE` +0.0155).
-- A/B #2 (`results/ab_bl19_short_20260406_161844.json`): baseline sem scheduler voltou a superar em teste
-    (`R²` -0.1184, `Spearman` -0.0230, `MAE` +0.0259 para scheduler).
-**Conclusão:** BL-19 está tecnicamente implementada e validada em teste curto, mas sem evidência robusta
-de ganho de generalização. Manter `scheduler_enabled=False` como default até BL-20.
+- Scripts de A/B curto e completo criados (`scripts/ab_test_bl19_short.py`, `scripts/ab_test_bl19_full.py`)
+**Evidência consolidada (2026-04-06):**
+- Triagem curta (10 ativos, 3 épocas): resultados inconsistentes, sem ganho robusto em teste.
+- BL-20 (30 ativos, 10 épocas, seeds 42/123/777) salvo em `results/ab_bl19_full_20260406_181547.json`.
+- Delta médio (scheduler - baseline): `R²` +0.0265, `Spearman` +0.0211, `MAE` -0.0020, mas com alta variância.
+- Win-count por seed: scheduler venceu só 1/3 seeds em `R²`, `Spearman` e `MAE`.
+**Conclusão:** manter `scheduler_enabled=False` como default por ora; ativar scheduler apenas em estudos específicos.
 
 ### BL-20: A/B completo de robustez (30 ativos, múltiplas seeds)
-**Status:** 🔴 Pendente
-**Justificativa:** O A/B curto da BL-19 é útil para triagem, mas insuficiente para decisão de produção.
-**Ação:**
-- Rodar A/B com 30 ativos, 10-15 épocas e pelo menos 3 seeds fixas
-- Reportar média e desvio de Test R², Spearman, MAE e melhor época
-- Promover configuração vencedora para default apenas se ganho consistente no teste
+**Status:** 🟡 Executado (1ª rodada), requer rerun controlada
+**Justificativa:** A rodada completa foi concluída, mas houve falhas intermitentes de download
+(degradando o universo efetivo em parte dos runs), o que reduz a comparabilidade entre pares A/B.
+**Rodada executada (2026-04-06):**
+- Configuração: 30 ativos, 10 épocas, 3 seeds (42/123/777), modo regressão.
+- Resultado agregado: `results/ab_bl19_full_20260406_181547.json`.
+- Síntese: sem evidência consistente para promover scheduler como default.
+**Próxima ação (fechamento do BL-20):**
+- Repetir A/B com cache local fixo/snapshot de dados para congelar o universo por seed.
+- Exigir vitória da variante em maioria de seeds por métrica principal (`R²`, `Spearman`, `MAE`).
 **Dependência:** BL-19.
 
 ### BL-21: Gate de regressão para preservar baseline v0.7
