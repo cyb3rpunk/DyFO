@@ -182,15 +182,20 @@ em runs de regressão (`KeyError: 'auc'`), bloqueando parte do BL-16.
 - Validação executada em run de regressão sem `KeyError`
 
 ### BL-19: Estabilização via gradient clipping + LR scheduler
-**Status:** 🟡 Implementado, em validação
+**Status:** 🟡 Implementado e validado em triagem (não promovido para default)
 **Justificativa:** Configuração adicionada no treino para mitigar oscilações e melhorar convergência.
 **Implementação (2026-04-06):**
 - `grad_clip_enabled` e `grad_clip_max_norm` expostos em `train_link_prediction.py`
 - `ReduceLROnPlateau` integrado (fator, paciência, threshold, cooldown, min_lr configuráveis)
 - Histórico expandido com `lr` e `val_score`; persistência de `scheduler_state` no checkpoint
 - Script `scripts/ab_test_bl19_short.py` criado para A/B rápido (baseline vs scheduler)
-**Evidência inicial:** A/B curto (10 tickers, 3 épocas) aumentou `best_val_score`, mas piorou métricas de teste
-(R² e Spearman). Resultado não conclusivo para adoção final sem experimento completo.
+**Validação de triagem (2026-04-06):**
+- A/B #1 (`results/ab_bl19_short_20260406_155329.json`): scheduler melhorou `best_val_score` (+0.0828),
+    mas degradou teste (`R²` -0.1786, `Spearman` -0.0624, `MAE` +0.0155).
+- A/B #2 (`results/ab_bl19_short_20260406_161844.json`): baseline sem scheduler voltou a superar em teste
+    (`R²` -0.1184, `Spearman` -0.0230, `MAE` +0.0259 para scheduler).
+**Conclusão:** BL-19 está tecnicamente implementada e validada em teste curto, mas sem evidência robusta
+de ganho de generalização. Manter `scheduler_enabled=False` como default até BL-20.
 
 ### BL-20: A/B completo de robustez (30 ativos, múltiplas seeds)
 **Status:** 🔴 Pendente
