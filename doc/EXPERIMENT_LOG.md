@@ -525,6 +525,44 @@ Visando otimização do projeto com o máximo rigor de "Data Leakage" e ML Finan
 
 ---
 
+### v1.0 — Robust Statistical Validation (v3.1)
+**Run:** `bootstrap_eval_v3_20260413_085728`
+**Data:** 2026-04-13 09:00
+
+**Motivação:** Superar o GAP estatístico do v0.9 (que era baseado em p-valores ingênuos). Implementado pipeline robusto com Diebold-Mariano (HAC Newey-West), Wilcoxon pareado e correções múltiplos (Holm-Bonferroni).
+
+**Resultados de predição de correlação (Acurácia Técnica):**
+
+| Variante | Test R² | Test Spearman | Test MAE | Test cls-F1 | MAE Reduction vs ROLAND |
+|----------|---------|---------------|----------|-------------|-------------------------|
+| **TGN** | **0.803** | **0.932** | **0.050** | **0.782** | **41.9%** |
+| GAT-Static | 0.565 | 0.902 | 0.078 | 0.509 | 10.1% |
+| ROLAND | 0.390 | 0.752 | 0.086 | 0.426 | 0.0% |
+
+**Validação de Superioridade Preditiva (Holm-Bonferroni Corrected):**
+- **TGN vs ROLAND (Wilcoxon): p < 0.0001 → ✅ SIGNIFICATIVO (PASS)**
+- **TGN vs ROLAND (DM-MAE): p < 0.0001 → ✅ SIGNIFICATIVO (PASS)**
+- **TGN vs ROLAND (DM-MSE): p < 0.0001 → ✅ SIGNIFICATIVO (PASS)**
+- **TGN vs GAT-ST (Wilcoxon): p < 0.0001 → ✅ SIGNIFICATIVO (PASS)**
+
+**Resultados econômicos (Sharpe GMVP + Bootstrap):**
+
+| Variante | Sharpe obs. | Bootstrap Mean | CI 95% |
+|----------|-------------|----------------|--------|
+| **TGN** | 2.178 | 2.297 | [0.23, 4.50] |
+| GAT-Static | 2.387 | 2.524 | [0.47, 4.71] |
+| ROLAND | 2.229 | 2.356 | [0.31, 4.55] |
+
+**Validação da Hipótese H4 (Financeira):**
+- **P(TGN ≤ ROLAND) [Sharpe] = 0.595 → ✗ NÃO SUPORTADA (n.s.)**
+- **P(TGN ≤ ROLAND) [CVaR] = 0.289 → ✗ NÃO SUPORTADA (n.s.)**
+
+**Conclusão:** 
+O TGN atingiu o estado da arte em **predição de correlação**, com R² de 0.803 e Spearman de 0.932, superando o ROLAND em 42% de redução no erro absoluto. A superioridade técnica é estatisticamente indiscutível (p < 0.0001 em DM e Wilcoxon após correção Holm). 
+Contudo, nesta janela específica, a superioridade técnica não se traduziu em superioridade financeira (Sharpe Proxy), onde o GAT-Static foi o mais resiliente. Isso reforça a literatura de que "mais acurácia preditiva não garante maior Sharpe" devido ao custo de turnover e estimation risk no otimizador.
+
+---
+
 ## 5. Análise e Lições Aprendidas
 
 ### 5.1 O problema do viés precision/recall
