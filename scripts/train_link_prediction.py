@@ -28,8 +28,10 @@ Or programmatically:
 
 from __future__ import annotations
 
+import math
 import os
 import time
+import datetime
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
@@ -40,6 +42,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from scipy.optimize import minimize
 
 from dyfo.config import DataConfig, DyFOConfig
 from dyfo.core.edge_features import (
@@ -48,6 +51,9 @@ from dyfo.core.edge_features import (
     compute_factor_edges,
     compute_rolling_correlations,
 )
+
+# Epoch used by timestamp_to_float (must match event_stream.py)
+_EPOCH = datetime.date(2000, 1, 1)
 from dyfo.core.event_stream import EventStreamBuilder, FinancialEvent, timestamp_to_float
 from dyfo.core.graph_builder import GraphBuilder
 from dyfo.core.link_prediction import (
@@ -120,9 +126,8 @@ def prepare_data(
     actions_df = get_corporate_actions(tickers, start, end)
 
     logger.info("Downloading FRED macro series...")
-    from dotenv import load_dotenv
-    load_dotenv()
-    fred_key = os.environ.get("FRED_API_KEY", "")
+    # Prioritize environment, then DataConfig
+    fred_key = os.environ.get("FRED_API_KEY", data_config.fred_api_key)
     macro_df = download_fred_series(data_config.fred_series, start, end, api_key=fred_key)
     macro_events_df = detect_macro_events(macro_df, threshold_std=1.5)
 
@@ -261,6 +266,12 @@ def train_link_prediction(
     model_variant: str = "tgn",
     seed: int = 42,
     prepared_data: dict = None,
+    config: "DyFOConfig" = None,
+    decoder_hidden_dim: int = 64,
+    use_cosine_schedule: bool = False,
+    test_dates: List[int] = None,
+    val_dates: List[int] = None,
+    train_dates: List[int] = None,
 ):
     """Full training pipeline for link prediction pre-training.
 
@@ -274,13 +285,27 @@ def train_link_prediction(
     prepared_data : dict, optional
         Pre-loaded data dict from ``prepare_data()``.  Pass this when running
         multiple seeds to avoid re-downloading data for every run.
+    config : DyFOConfig, optional
+        Custom architecture config. If None, uses DyFOConfig defaults.
+        Useful for tuning embedding_dim, memory_dim, num_attention_heads.
+    decoder_hidden_dim : int
+        Hidden layer width for the CorrelationRegressor / LinkPredictor MLP.
+        Default 64; increase to 128 for more decoder capacity.
+    use_cosine_schedule : bool
+        If True, replaces the flat-after-warmup LR with cosine annealing
+        (warmup 2 ep → cosine decay to 10 % of peak). Recommended for
+        runs with num_epochs > 10.
+    test_dates, val_dates, train_dates : List[int], optional
+        Custom date lists for splits. If provided, the internal 60/20/20
+        split logic is bypassed.
     """
 
     run_tag = f"link_pred_{model_variant}_s{seed}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}"
     logger = setup_logging("dyfo", run_tag=run_tag)
     results = ResultLogger(run_tag=run_tag)
 
-    config = DyFOConfig(model_variant=model_variant)
+    if config is None:
+        config = DyFOConfig(model_variant=model_variant)
     data_config = DataConfig(tickers=tickers, benchmark_ticker=benchmark, start_date=start, end_date=end)
 
     results.log_params({
@@ -322,14 +347,17 @@ def train_link_prediction(
     sorted_dates = data["sorted_dates"]
     num_nodes = len(tickers)
 
-    # Walk-forward split: 60/20/20
-    n = len(sorted_dates)
-    train_end = int(n * 0.6)
-    val_end = int(n * 0.8)
+    # Walk-forward split: 60/20/20 (or custom if provided)
+    if train_dates is not None and val_dates is not None and test_dates is not None:
+        logger.info("Using CUSTOM walk-forward splits provided by caller.")
+    else:
+        n = len(sorted_dates)
+        train_end = int(n * 0.6)
+        val_end = int(n * 0.8)
 
-    train_dates = sorted_dates[:train_end]
-    val_dates = sorted_dates[train_end:val_end]
-    test_dates = sorted_dates[val_end:]
+        train_dates = sorted_dates[:train_end]
+        val_dates = sorted_dates[train_end:val_end]
+        test_dates = sorted_dates[val_end:]
 
     logger.info(
         "Walk-forward split: train=%d, val=%d, test=%d days",
@@ -374,13 +402,13 @@ def train_link_prediction(
     is_regression = mode == "regression"
     if is_regression:
         decoder = CorrelationRegressor(
-            embedding_dim=config.embedding_dim, hidden_dim=64, dropout=config.dropout
+            embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout
         )
         loss_fn = nn.SmoothL1Loss()
         logger.info("Mode: REGRESSION (predict continuous rho, Huber loss)")
     else:
         decoder = LinkPredictor(
-            embedding_dim=config.embedding_dim, hidden_dim=64, dropout=config.dropout
+            embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout
         )
         logger.info("Mode: CLASSIFICATION (predict binary edge, BCE loss)")
 
@@ -388,12 +416,23 @@ def train_link_prediction(
     all_params = list(encoder.parameters()) + list(decoder.parameters())
     optimizer = optim.Adam(all_params, lr=lr, weight_decay=weight_decay)
 
-    # Linear LR warmup for first 2 epochs
+    # LR schedule: cosine annealing with warmup (recommended for long runs)
+    # or plain linear warmup that plateaus (legacy default).
     warmup_epochs = min(2, num_epochs)
-    scheduler = optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lr_lambda=lambda ep: min(1.0, (ep + 1) / warmup_epochs),
-    )
+    if use_cosine_schedule and num_epochs > 4:
+        def _cosine_lr(ep: int, _w: int = warmup_epochs, _n: int = num_epochs) -> float:
+            if ep < _w:
+                return (ep + 1) / max(1, _w)
+            progress = (ep - _w) / max(1, _n - _w)
+            return 0.1 + 0.9 * 0.5 * (1.0 + math.cos(math.pi * progress))
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=_cosine_lr)
+        logger.info("LR schedule: cosine annealing with %d-epoch warmup", warmup_epochs)
+    else:
+        scheduler = optim.lr_scheduler.LambdaLR(
+            optimizer,
+            lr_lambda=lambda ep: min(1.0, (ep + 1) / warmup_epochs),
+        )
+        logger.info("LR schedule: linear warmup (%d epochs), then flat", warmup_epochs)
 
     # Static graph info (used by TGN; ignored by GAT-Static and ROLAND)
     edge_index = data["graph"].get_full_edge_index()
@@ -421,6 +460,23 @@ def train_link_prediction(
         return data["node_features_by_date"][closest]
 
     # ------------------------------------------------------------------
+    # Helper: Portfolio optimization (GMV)
+    # ------------------------------------------------------------------
+    def optimize_min_variance(cov_matrix: np.ndarray) -> np.ndarray:
+        """Find Global Minimum Variance weights: min w' Sigma w s.t. sum(w)=1, w >= 0."""
+        n = cov_matrix.shape[0]
+        # Equal weight as initial guess
+        init_w = np.ones(n) / n
+        bounds = [(0, 1) for _ in range(n)]
+        cons = ({"type": "eq", "fun": lambda w: np.sum(w) - 1})
+
+        def obj(w):
+            return w.T @ cov_matrix @ w
+
+        res = minimize(obj, init_w, bounds=bounds, constraints=cons, method="SLSQP", tol=1e-6)
+        return res.x if res.success else init_w
+
+    # ------------------------------------------------------------------
     # Helper: run one split (train, val, or test)
     # ------------------------------------------------------------------
     def run_split(
@@ -442,6 +498,13 @@ def train_link_prediction(
         num_batches = 0
         all_preds = []
         all_targets = []
+        realized_returns = []
+
+        # For Sharpe calculation: get daily returns
+        price_returns = data["prices"].pct_change().fillna(0)
+        # 21-day rolling volatility for covariance reconstruction
+        price_vols = price_returns.rolling(window=21).std() * np.sqrt(252)
+        price_vols = price_vols.fillna(0.15)  # 15% default vol if too early
 
         for d_idx in range(len(dates) - 1):
             today = dates[d_idx]
@@ -529,9 +592,66 @@ def train_link_prediction(
                 all_preds.append(preds.detach())
                 all_targets.append(targets)
 
+            # --- Economic Utility (Sharpe Proxy) ---
+            # Only for test split or specific validation requests
+            if split_name == "test" and is_regression:
+                with torch.no_grad():
+                    # Preds: shape (num_pairs,) in [-1, 1]
+                    # We need to build the full correlation matrix
+                    corr_matrix = np.eye(num_nodes)
+                    idx = 0
+                    pairs_processed = set()
+                    
+                    # reconstruct indices from BuildRegressionLabels logic (sorted pairs)
+                    # For simplicity, we assume preds correspond to the pairs in tomorrow's dict
+                    p_np = preds.detach().cpu().numpy()
+                    
+                    # We need the original pair mapping
+                    # Since we don't have it explicitly, we recreate the build logic here
+                    seen = set()
+                    pair_list = []
+                    for (i, j) in corr_tomorrow.keys():
+                        pair = (min(i, j), max(i, j))
+                        if pair not in seen:
+                            seen.add(pair)
+                            pair_list.append(pair)
+                    
+                    if len(p_np) == len(pair_list):
+                        for p_idx, (i, j) in enumerate(pair_list):
+                            rho = p_np[p_idx]
+                            corr_matrix[i, j] = rho
+                            corr_matrix[j, i] = rho
+                        
+                        # Build Covariance Matrix
+                        date_str = str(_EPOCH + datetime.timedelta(days=tomorrow))
+                        # Use today's vol to predict tomorrow's risk
+                        vols = price_vols.loc[date_str].values if date_str in price_vols.index else np.full(num_nodes, 0.15)
+                        cov = np.diag(vols) @ corr_matrix @ np.diag(vols)
+                        
+                        # Add small regularization for stability
+                        cov += np.eye(num_nodes) * 1e-4
+                        
+                        # Optimize weights
+                        weights = optimize_min_variance(cov)
+                        
+                        # Realized return tomorrow
+                        # Convert tomorrow (float days since 2000) back to price index
+                        day_returns = price_returns.loc[date_str].values if date_str in price_returns.index else np.zeros(num_nodes)
+                        realized_ret = np.dot(weights, day_returns)
+                        realized_returns.append(realized_ret)
+
         # Average metrics
         if num_batches > 0:
             avg_metrics = {k: v / num_batches for k, v in epoch_metrics.items()}
+            
+            # --- Aggregated Sharpe ---
+            if realized_returns:
+                rets = np.array(realized_returns)
+                if len(rets) > 1 and rets.std() > 0:
+                    sharpe = (rets.mean() / (rets.std() + 1e-8)) * np.sqrt(252)
+                else:
+                    sharpe = 0.0
+                avg_metrics["sharpe_proxy"] = sharpe
         else:
             if is_regression:
                 avg_metrics = {
@@ -546,6 +666,8 @@ def train_link_prediction(
         if collect_predictions and all_preds:
             avg_metrics["_all_preds"] = torch.cat(all_preds)
             avg_metrics["_all_targets"] = torch.cat(all_targets)
+            if realized_returns:
+                avg_metrics["_realized_returns"] = realized_returns
 
         return avg_metrics
 
@@ -667,7 +789,8 @@ def train_link_prediction(
 
     # Test with inherited temporal state
     test_metrics = run_split(
-        test_dates, "test", train_mode=False, logit_threshold=best_threshold
+        test_dates, "test", train_mode=False, logit_threshold=best_threshold,
+        collect_predictions=True
     )
 
     if is_regression:
@@ -691,7 +814,7 @@ def train_link_prediction(
     results.log_metrics({
         "best_epoch": best_epoch,
         f"best_val_{score_key}": best_val_score,
-        **{f"test_{k}": v for k, v in test_metrics.items()},
+        **{f"test_{k}": v for k, v in test_metrics.items() if not k.startswith("_")},
     })
 
     import json
@@ -720,6 +843,8 @@ def train_link_prediction(
     logger.info("  Results:          %s", results_path)
     logger.info("  Best model:       %s", results.run_dir / "best_model.pt")
 
+    test_metrics["_best_val_r_squared"] = best_val_score
+    test_metrics["_best_epoch"] = best_epoch
     return test_metrics
 
 

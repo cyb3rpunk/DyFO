@@ -280,6 +280,12 @@ class TemporalGraphAttention(nn.Module):
         weighted_v = alpha * v  # (E, head_dim * num_heads)
         attn_out.scatter_add_(0, tgt.unsqueeze(-1).expand_as(weighted_v), weighted_v)
 
+        # Guarda os pesos de atenção do último forward pass para visualização (Attention Heatmap)
+        if not hasattr(self, 'last_alpha') or self.training == False:
+             self.last_src = src.detach().cpu()
+             self.last_tgt = tgt.detach().cpu()
+             self.last_alpha = alpha.detach().cpu().squeeze(-1) # (E,)
+
         z = self.mlp(torch.cat([h, attn_out], dim=-1))  # (N, embedding_dim)
         return z
 
