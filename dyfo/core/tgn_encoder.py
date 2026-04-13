@@ -280,6 +280,12 @@ class TemporalGraphAttention(nn.Module):
         weighted_v = alpha * v  # (E, head_dim * num_heads)
         attn_out.scatter_add_(0, tgt.unsqueeze(-1).expand_as(weighted_v), weighted_v)
 
+        # Guarda os pesos de atenção do último forward pass para visualização (Attention Heatmap)
+        if not hasattr(self, 'last_alpha') or self.training == False:
+             self.last_src = src.detach().cpu()
+             self.last_tgt = tgt.detach().cpu()
+             self.last_alpha = alpha.detach().cpu().squeeze(-1) # (E,)
+
         z = self.mlp(torch.cat([h, attn_out], dim=-1))  # (N, embedding_dim)
         return z
 
@@ -344,6 +350,25 @@ class TGNEncoder(nn.Module):
         # Edge type embedding for the GAT layer
         self.edge_type_emb_gat = nn.Embedding(num_edge_types + 1, edge_type_emb_dim)
 
+        # Weight initialisation — orthogonal GRU, Xavier for Linear layers
+        self._init_weights()
+
+    def _init_weights(self):
+        """Orthogonal init for GRU weights; Xavier uniform for all Linear layers.
+
+        Orthogonal init keeps singular values at 1.0, preventing vanishing/
+        exploding gradients through the recurrent path even at epoch 1.
+        """
+        nn.init.orthogonal_(self.memory_updater.gru.weight_ih)
+        nn.init.orthogonal_(self.memory_updater.gru.weight_hh)
+        nn.init.zeros_(self.memory_updater.gru.bias_ih)
+        nn.init.zeros_(self.memory_updater.gru.bias_hh)
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
     def reset_memory(self):
         """Zero out all node memories and timestamps. Call at episode start."""
         self.memory.zero_()
@@ -360,74 +385,79 @@ class TGNEncoder(nn.Module):
     ):
         """Process a batch of events: compute messages and update memory.
 
-        This implements the Raw Message Store pattern:
-        - Messages are computed from CURRENT memory
-        - Memory is updated with the computed messages
+        DyFO next-day variant (not the classical TGN Raw Message Store):
+        - All messages are computed from the pre-update memory state — no
+          within-batch leakage because prediction targets are always the
+          *next* day's labels.
+        - Source-side and target-side messages are collected into a single
+          pool and passed to ONE aggregator call, so a node that appears as
+          both source and target in the same batch receives a single coherent
+          GRU input rather than an arbitrary sum of two separately aggregated
+          tensors.
         """
         B = source_nodes.shape[0]
         device = source_nodes.device
 
-        # Gather source and target memories
-        mem_src = self.memory[source_nodes]
-
-        # For node-only events (target == -1), use zeros
+        # ------------------------------------------------------------------
+        # Source-side messages (all B events)
+        # ------------------------------------------------------------------
+        # For node-only events (target == -1), use zeros for the partner memory
         valid_target = target_nodes.clone()
-        is_node_only = target_nodes == -1
-        valid_target[is_node_only] = 0
+        pair_mask = target_nodes != -1
+        valid_target[~pair_mask] = 0
         mem_tgt = self.memory[valid_target]
-        mem_tgt[is_node_only] = 0.0
+        mem_tgt[~pair_mask] = 0.0
 
-        # Delta time since last update
-        dt = timestamps - self.last_update_time[source_nodes]
+        dt_src = timestamps - self.last_update_time[source_nodes]
 
-        # Compute raw messages
-        raw_messages = self.message_fn(
-            memory_src=mem_src,
+        src_messages = self.message_fn(
+            memory_src=self.memory[source_nodes],
             memory_tgt=mem_tgt,
-            delta_t=dt,
+            delta_t=dt_src,
             event_features=event_features,
             edge_type_ids=edge_type_ids,
             event_type_ids=event_type_ids,
         )
 
-        # Aggregate messages per source node
+        # ------------------------------------------------------------------
+        # Target-side messages (pair/bilateral events only)
+        # ------------------------------------------------------------------
+        real_targets = target_nodes[pair_mask]
+        src_for_tgt = source_nodes[pair_mask]
+
+        all_node_ids = source_nodes
+        all_messages = src_messages
+        all_timestamps = timestamps
+
+        if len(real_targets) > 0:
+            dt_tgt = timestamps[pair_mask] - self.last_update_time[real_targets]
+
+            tgt_messages = self.message_fn(
+                memory_src=self.memory[real_targets],
+                memory_tgt=self.memory[src_for_tgt],
+                delta_t=dt_tgt,
+                event_features=event_features[pair_mask],
+                edge_type_ids=edge_type_ids[pair_mask],
+                event_type_ids=event_type_ids[pair_mask],
+            )
+
+            # Unified pool — one aggregation pass over all roles
+            all_node_ids = torch.cat([source_nodes, real_targets])
+            all_messages = torch.cat([src_messages, tgt_messages])
+            all_timestamps = torch.cat([timestamps, timestamps[pair_mask]])
+
+        # ------------------------------------------------------------------
+        # Single aggregation → single GRU update per node
+        # ------------------------------------------------------------------
         agg_messages = self.aggregator(
-            node_ids=source_nodes,
-            messages=raw_messages,
-            timestamps=timestamps,
+            node_ids=all_node_ids,
+            messages=all_messages,
+            timestamps=all_timestamps,
             num_nodes=self.num_nodes,
         )
 
-        # Determine which nodes received messages
         update_mask = torch.zeros(self.num_nodes, dtype=torch.bool, device=device)
-        update_mask[source_nodes.unique()] = True
-
-        # Also process target nodes (bidirectional update for pair events)
-        real_targets = target_nodes[~is_node_only]
-        if len(real_targets) > 0:
-            # Build messages for target side
-            tgt_mem_src = self.memory[real_targets]
-            src_for_tgt = source_nodes[~is_node_only]
-            tgt_mem_tgt = self.memory[src_for_tgt]
-            tgt_dt = timestamps[~is_node_only] - self.last_update_time[real_targets]
-
-            tgt_messages = self.message_fn(
-                memory_src=tgt_mem_src,
-                memory_tgt=tgt_mem_tgt,
-                delta_t=tgt_dt,
-                event_features=event_features[~is_node_only],
-                edge_type_ids=edge_type_ids[~is_node_only],
-                event_type_ids=event_type_ids[~is_node_only],
-            )
-
-            tgt_agg = self.aggregator(
-                node_ids=real_targets,
-                messages=tgt_messages,
-                timestamps=timestamps[~is_node_only],
-                num_nodes=self.num_nodes,
-            )
-            agg_messages = agg_messages + tgt_agg
-            update_mask[real_targets.unique()] = True
+        update_mask[all_node_ids.unique()] = True
 
         # Update memory
         self.memory = self.memory_updater(agg_messages, self.memory, update_mask)

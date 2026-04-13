@@ -302,9 +302,10 @@ def build_regression_labels(
         perm = torch.randperm(len(src))[:n]
         src, dst, rho_values = src[perm], dst[perm], rho_values[perm]
 
-    # Shuffle
-    perm = torch.randperm(len(src))
-    return src[perm], dst[perm], rho_values[perm]
+    # NB: Não aplicar shuffle — a ordem determinística (sorted unique pairs)
+    # é necessária para alinhamento cross-model no Wilcoxon signed-rank test.
+    # O Huber loss é indiferente à ordem dos samples.
+    return src, dst, rho_values
 
 
 def compute_regression_metrics(

@@ -8,6 +8,8 @@ from typing import List
 class DyFOConfig:
     """Master configuration for the DyFO module."""
 
+    model_variant: str = "tgn"  # Encoder variant: "tgn", "roland", or "gat_static"
+
     # --- Graph dimensions ---
     memory_dim: int = 172
     embedding_dim: int = 100
@@ -62,7 +64,7 @@ class DataConfig:
     end_date: str = "2025-12-31"
 
     # --- FRED series IDs ---
-    fred_api_key: str = ""
+    fred_api_key: str = "7a786abc97ebd22946d8763e4d9130bf"  # 32-char hex string
     fred_series: dict = field(
         default_factory=lambda: {
             "fed_funds_rate": "DFF",
