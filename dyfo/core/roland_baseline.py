@@ -252,7 +252,7 @@ class ROLANDLikeEncoder(BaseGraphEncoder):
         Tensor of shape (num_nodes, embedding_dim) — differentiable w.r.t.
         GAT parameters.
         """
-        ei = self._snap_edge_index
+        ei = self._snap_edge_index.to(node_features.device)
 
         # GAT forward (differentiable)
         h_gat = self.gat1(node_features, ei)

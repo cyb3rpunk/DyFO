@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Dict, Iterable, List, Optional, Sequence
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -40,7 +41,9 @@ class TemporalKGCore(nn.Module):
         self.adapter = TemporalKGAdapter(num_asset_nodes=num_nodes)
 
         self.register_buffer("node_state", torch.zeros(num_nodes, memory_dim))
-        self.register_buffer("last_update_time", torch.zeros(num_nodes))
+        # last_update_time is only used for dt computation in Python — keeping it
+        # as a plain numpy array avoids one GPU→CPU .item() sync per fact per day.
+        self.last_update_time: np.ndarray = np.zeros(num_nodes, dtype=np.float64)
         self.relation_embeddings = nn.Embedding(len(self.relation_names), memory_dim)
         self.pseudo_entity_embeddings = nn.Embedding(16, memory_dim)
         self.time_encoder = Time2Vec(time_dim)
@@ -73,7 +76,7 @@ class TemporalKGCore(nn.Module):
 
     def reset_state(self) -> None:
         self.node_state.zero_()
-        self.last_update_time.zero_()
+        self.last_update_time[:] = 0.0
         self.fact_history = []
         self.last_fact_batch = []
         self.last_explanations = []
@@ -130,7 +133,7 @@ class TemporalKGCore(nn.Module):
             tail_state = self.pseudo_entity_embeddings.weight[self._pseudo_entity_id(fact)]
 
         dt = torch.tensor(
-            [fact.timestamp - float(self.last_update_time[head_idx].item())],
+            [fact.timestamp - float(self.last_update_time[head_idx])],
             dtype=torch.float32,
             device=device,
         )
@@ -198,7 +201,11 @@ class TemporalKGCore(nn.Module):
             )
         facts.sort(key=lambda fact: (fact.timestamp, fact.head, fact.relation, fact.tail))
         self.last_fact_batch = facts
-        self.fact_history.extend(facts)
+        # Cap history at 2000 facts to avoid unbounded memory growth across windows.
+        if not self.training:
+            self.fact_history.extend(facts)
+            if len(self.fact_history) > 2000:
+                self.fact_history = self.fact_history[-2000:]
 
         if not facts:
             self.last_explanations = []
@@ -239,7 +246,7 @@ class TemporalKGCore(nn.Module):
             tail_combined_list.append(tail_combined)
             relation_ids_list.append(relation_id)
             attrs_list.append(values)
-            dts_list.append(fact.timestamp - float(self.last_update_time[head_idx].item()))
+            dts_list.append(fact.timestamp - float(self.last_update_time[head_idx]))
 
             # head always receives its own message
             recipient_list.append(head_idx)
@@ -280,7 +287,7 @@ class TemporalKGCore(nn.Module):
         msg_sum = torch.zeros(self.num_nodes, self.memory_dim, device=device)
         msg_count = torch.zeros(self.num_nodes, device=device)
         msg_sum.index_add_(0, recip_t, selected_msgs)
-        msg_count.index_add_(0, recip_t, torch.ones(R, device=device))
+        msg_count.index_add_(0, recip_t, torch.ones(R, dtype=torch.float32, device=device))
 
         update_mask = msg_count > 0
         update_idx_t = update_mask.nonzero(as_tuple=True)[0]           # (K,)

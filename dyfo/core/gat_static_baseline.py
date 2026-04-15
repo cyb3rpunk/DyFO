@@ -252,7 +252,7 @@ class GATStaticEncoder(BaseGraphEncoder):
         -------
         Tensor of shape (num_nodes, embedding_dim).
         """
-        ei = self.static_edge_index
+        ei = self.static_edge_index.to(node_features.device)
         h = self.gat1(node_features, ei)
         h = self.gat2(h, ei)
         return h

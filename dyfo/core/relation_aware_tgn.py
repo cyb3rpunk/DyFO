@@ -758,18 +758,17 @@ class RelationAwareTGNEncoder(nn.Module):
             update_mask=update_mask,
         )
 
-        for idx in range(source_nodes.shape[0]):
-            src = source_nodes[idx].item()
-            self.last_update_time[src] = max(
-                self.last_update_time[src].item(),
-                timestamps[idx].item(),
+        # Vectorised timestamp update — replaces a Python loop with N .item() syncs.
+        # scatter_reduce_ 'amax' does max-reduction in one GPU kernel per call.
+        self.last_update_time.scatter_reduce_(
+            0, source_nodes, timestamps, reduce="amax", include_self=True
+        )
+        real_targets = target_nodes[target_nodes >= 0]
+        if real_targets.numel() > 0:
+            ts_for_tgt = timestamps[target_nodes >= 0]
+            self.last_update_time.scatter_reduce_(
+                0, real_targets, ts_for_tgt, reduce="amax", include_self=True
             )
-            tgt = target_nodes[idx].item()
-            if tgt >= 0:
-                self.last_update_time[tgt] = max(
-                    self.last_update_time[tgt].item(),
-                    timestamps[idx].item(),
-                )
 
     def compute_embeddings(
         self,
@@ -848,7 +847,9 @@ class RAHTGNEncoder(BaseGraphEncoder):
             dtype=torch.float32,
             device=device,
         )
-        event_features = torch.stack([event.features.to(device) for event in events])
+        # Stack on CPU first, then move in a single transfer — avoids N individual
+        # .to(device) calls that each incur a GPU kernel launch + sync overhead.
+        event_features = torch.stack([event.features for event in events]).to(device)
         edge_type_ids = torch.tensor(
             [
                 self._edge_type_to_id.get(event.edge_type, self._no_edge_id)
