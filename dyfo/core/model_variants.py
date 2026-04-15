@@ -13,9 +13,11 @@ Use ``build_encoder(config, num_nodes)`` to instantiate the right variant.
 Variants
 --------
 "tgn"        — original DyFO Temporal Graph Network (DyFOModule wrapper)
+"ra_htgn"    — relation-aware heterogeneous TGN with semantic relation fusion
 "gat_static" — 2-layer GAT on a static mean-correlation graph (GATStaticEncoder)
 "roland"     — ROLAND-like monthly snapshot GNN with EMA state update
                (ROLANDLikeEncoder; see roland_baseline.py for caveats)
+"temporal_kg" — interpretable temporal knowledge-graph encoder for BL-18
 """
 
 from __future__ import annotations
@@ -222,6 +224,11 @@ def build_encoder(
     if v == "tgn":
         return TGNWrapper(config, num_nodes)
 
+    if v == "ra_htgn":
+        from dyfo.core.relation_aware_tgn import RAHTGNEncoder
+
+        return RAHTGNEncoder(config, num_nodes)
+
     if v == "gat_static":
         from dyfo.core.gat_static_baseline import GATStaticEncoder
 
@@ -232,7 +239,12 @@ def build_encoder(
 
         return ROLANDLikeEncoder(config, num_nodes, **kwargs)
 
+    if v == "temporal_kg":
+        from dyfo.core.temporal_kg import TemporalKGEncoder
+
+        return TemporalKGEncoder(config, num_nodes)
+
     raise ValueError(
         f"Unknown model_variant {v!r}. "
-        "Valid choices: 'tgn', 'gat_static', 'roland'."
+        "Valid choices: 'tgn', 'ra_htgn', 'gat_static', 'roland', 'temporal_kg'."
     )

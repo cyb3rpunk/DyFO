@@ -60,6 +60,7 @@ def setup_logging(
 
     logger = logging.getLogger(name)
     logger.setLevel(level)
+    logger.propagate = False
 
     # Avoid duplicate handlers on repeated calls
     if logger.handlers:

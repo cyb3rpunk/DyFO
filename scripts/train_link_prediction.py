@@ -2,8 +2,10 @@
 
 Supports three encoder variants (--model_variant / model_variant= parameter):
   tgn         — Temporal Graph Network (original DyFO encoder, default)
+  ra_htgn     — relation-aware heterogeneous TGN (BL-17)
   gat_static  — 2-layer GAT on a static mean-correlation graph (BL-02)
   roland      — ROLAND-like monthly snapshot GNN with EMA state (BL-02)
+  temporal_kg — interpretable temporal KG ablation arm (BL-18)
 
 All variants share the same decoder (CorrelationRegressor / LinkPredictor)
 and the same walk-forward 60/20/20 evaluation protocol.
@@ -278,7 +280,8 @@ def train_link_prediction(
     Parameters
     ----------
     model_variant : str
-        Encoder variant: ``"tgn"`` (default), ``"gat_static"``, or ``"roland"``.
+        Encoder variant: ``"tgn"`` (default), ``"ra_htgn"``, ``"gat_static"``,
+        ``"roland"``, or ``"temporal_kg"``.
     seed : int
         RNG seed for reproducibility.  Applied after data preparation so
         deterministic downloads do not consume RNG state.
@@ -377,8 +380,13 @@ def train_link_prediction(
     logger.info("Initializing model (variant=%s)...", model_variant)
     logger.info("=" * 60)
 
+    # Select compute device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info("Using device: %s", device)
+
     # Build encoder via factory
     encoder: BaseGraphEncoder = build_encoder(config, num_nodes, variant=model_variant)
+    encoder = encoder.to(device)
 
     # Variant-specific post-init setup
     if model_variant == "gat_static":
@@ -403,13 +411,13 @@ def train_link_prediction(
     if is_regression:
         decoder = CorrelationRegressor(
             embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout
-        )
+        ).to(device)
         loss_fn = nn.SmoothL1Loss()
         logger.info("Mode: REGRESSION (predict continuous rho, Huber loss)")
     else:
         decoder = LinkPredictor(
             embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout
-        )
+        ).to(device)
         logger.info("Mode: CLASSIFICATION (predict binary edge, BCE loss)")
 
     # Optimise encoder + decoder jointly
@@ -435,9 +443,9 @@ def train_link_prediction(
         logger.info("LR schedule: linear warmup (%d epochs), then flat", warmup_epochs)
 
     # Static graph info (used by TGN; ignored by GAT-Static and ROLAND)
-    edge_index = data["graph"].get_full_edge_index()
-    edge_type_ids = data["graph"].get_edge_type_ids()
-    edge_timestamps = torch.zeros(edge_index.shape[1])
+    edge_index = data["graph"].get_full_edge_index().to(device)
+    edge_type_ids = data["graph"].get_edge_type_ids().to(device)
+    edge_timestamps = torch.zeros(edge_index.shape[1], device=device)
 
     total_params = sum(p.numel() for p in all_params)
     trainable_params = sum(p.numel() for p in all_params if p.requires_grad)
@@ -511,7 +519,7 @@ def train_link_prediction(
             tomorrow = dates[d_idx + 1]
 
             day_events = data["events_by_date"].get(today, [])
-            node_feat = get_node_features(today)
+            node_feat = get_node_features(today).to(device)
             current_time = float(today) + 0.99
 
             # Correlation labels — mode-appropriate source
@@ -537,6 +545,9 @@ def train_link_prediction(
                 src, dst, targets = build_link_labels(
                     corr_today, corr_tomorrow, num_nodes, corr_threshold, neg_ratio,
                 )
+            src = src.to(device)
+            dst = dst.to(device)
+            targets = targets.to(device)
 
             if len(src) == 0:
                 with torch.no_grad():
@@ -560,7 +571,7 @@ def train_link_prediction(
                     loss = loss_fn(preds, targets)
                 else:
                     loss = nn.functional.binary_cross_entropy_with_logits(
-                        preds, targets, pos_weight=torch.tensor(pos_weight),
+                        preds, targets, pos_weight=torch.tensor(pos_weight, device=device),
                     )
 
                 optimizer.zero_grad()
@@ -792,6 +803,8 @@ def train_link_prediction(
         test_dates, "test", train_mode=False, logit_threshold=best_threshold,
         collect_predictions=True
     )
+    if model_variant == "temporal_kg" and hasattr(encoder, "export_temporal_kg_artifacts"):
+        test_metrics["_temporal_kg_artifacts"] = encoder.export_temporal_kg_artifacts(top_k=10)
 
     if is_regression:
         logger.info(
@@ -880,7 +893,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="DyFO link prediction pre-training")
     parser.add_argument(
         "--variant",
-        choices=["tgn", "gat_static", "roland"],
+        choices=["tgn", "ra_htgn", "gat_static", "roland", "temporal_kg"],
         default="tgn",
         help="Encoder variant (default: tgn)",
     )

@@ -1,14 +1,22 @@
 """DyFO configuration dataclasses."""
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import ClassVar, List
 
 
 @dataclass
 class DyFOConfig:
     """Master configuration for the DyFO module."""
 
-    model_variant: str = "tgn"  # Encoder variant: "tgn", "roland", or "gat_static"
+    VALID_MODEL_VARIANTS: ClassVar[set[str]] = {
+        "gat_static",
+        "ra_htgn",
+        "roland",
+        "temporal_kg",
+        "tgn",
+    }
+
+    model_variant: str = "tgn"  # Encoder variant: "tgn", "roland", "gat_static", "ra_htgn", or "temporal_kg"
 
     # --- Graph dimensions ---
     memory_dim: int = 172
@@ -51,6 +59,14 @@ class DyFOConfig:
     # --- Data ---
     node_feature_dim: int = 20  # 1+1+1+11+1+1+K(3)+1 = 20 (see manual §2.2 with K=3)
     num_regimes: int = 3  # K regimes from RDM
+
+    def __post_init__(self) -> None:
+        if self.model_variant not in self.VALID_MODEL_VARIANTS:
+            valid = ", ".join(sorted(self.VALID_MODEL_VARIANTS))
+            raise ValueError(
+                f"Invalid model_variant {self.model_variant!r}. "
+                f"Valid choices: {valid}."
+            )
 
 
 @dataclass
