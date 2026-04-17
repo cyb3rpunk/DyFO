@@ -28,10 +28,7 @@
 - [02_graph_spec.md](02_graph_spec.md) — Nós, arestas tipadas, features e invariantes do grafo financeiro
 - [03_event_spec.md](03_event_spec.md) — Catálogo de eventos, vetores de features e regras de disparo
 - [04_tgn_spec.md](04_tgn_spec.md) — Especificação do TGN: message function, GRU, GAT, readout
-
-**Nota:** nesta branch, o núcleo do SDD ativo está concentrado nos documentos `00` a `04`.
-Os demais itens do índice antigo ainda não existem como arquivos separados e não devem ser
-assumidos como fonte de verdade.
+- [05_eval_protocol.md](05_eval_protocol.md) — Protocolo de avaliação experimental Rev 2: `--variants`, `--n_tickers`, `--ablation`
 
 ---
 
@@ -52,13 +49,16 @@ assumidos como fonte de verdade.
 | BL-11 | Factor edges Fama-French (FACT) | ✅ Implementado |
 | BL-12 | Staleness proxy | 🟡 Documentado, não implementado |
 | BL-16 | Report visual (gráficos + grafo) | 🔴 Pendente |
-| BL-17 | Relation-aware heterogeneous TGN | 🔴 Planejado neste SDD |
-| BL-18 | Temporal KG ablation interpretável | 🔴 Planejado após BL-17 |
+| BL-17 | Relation-aware heterogeneous TGN | ✅ Implementado (`ra_htgn`) |
+| BL-18 | Temporal KG ablation interpretável | ✅ Implementado (`temporal_kg`) |
+| BL-19 | `--variants` filter + `--n_tickers` + `--ablation` | ✅ Rev 2 (`run_bootstrap_eval_temporal_kg_rev2.py`) |
+| BL-20 | Ticker registry centralizado (30/50/100) | ✅ `dyfo/core/ticker_registry.py` |
 
 **Regra de implementação atual:**
-- Manter o universo fixo de **30 ações**
-- Usar [run_bootstrap_eval_v5.py](../scripts/run_bootstrap_eval_v5.py) como baseline experimental de referência
-- **Não editar** o runner atual para BL-17 nem para BL-18; cada variante terá script/entrypoint próprio
+- Universo padrão: **30 ações** (50 e 100 disponíveis via `--n_tickers`)
+- Usar [run_bootstrap_eval_v5.py](../scripts/run_bootstrap_eval_v5.py) como baseline experimental congelado
+- Runner ativo: `run_bootstrap_eval_temporal_kg_rev2.py` — suporta `--variants`, `--n_tickers`, `--ablation`
+- **Não editar** `run_bootstrap_eval_v5.py`, `run_bootstrap_eval_ra_htgn.py` nem `run_bootstrap_eval_temporal_kg_rev1.py`
 
 ---
 
@@ -77,8 +77,8 @@ assumidos como fonte de verdade.
 
 ## Roadmap imediato
 
-1. **BL-17:** implementar uma versão `relation-aware heterogeneous TGN` inspirada em TeSa/CTRL.
-   Ela preserva o fluxo de eventos contínuos, mas separa agregação intra-relação e inter-relação.
-2. **BL-18:** implementar um braço `Temporal KG` para ablação interpretável, sem substituir o pipeline BL-17.
-3. Validar ambos usando a mesma filosofia walk-forward de [run_bootstrap_eval_v5.py](../scripts/run_bootstrap_eval_v5.py:1),
-   porém em scripts novos para evitar regressão no protocolo já validado.
+1. ✅ **BL-17:** `ra_htgn` implementado e validado.
+2. ✅ **BL-18:** `temporal_kg` implementado e validado.
+3. ✅ **BL-19 / Rev 2:** `--variants`, `--n_tickers`, `--ablation` disponíveis em `rev2`.
+4. 🔴 **BL-20 (próximo):** Rodar ablação completa (`--ablation full`) para CORR/SECT/FACT e documentar contribuição relativa de cada tipo de aresta.
+5. 🔴 **BL-21 (futuro):** Validar `--n_tickers 50` e `--n_tickers 100` — requer implementação de TMFG para universo > 50.

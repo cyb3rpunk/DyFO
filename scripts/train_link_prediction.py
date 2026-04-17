@@ -863,55 +863,58 @@ def train_link_prediction(
 
 if __name__ == "__main__":
     import argparse
+    from dyfo.core.ticker_registry import get_tickers
 
-    # 30 S&P 500 tickers by liquidity, covering all 11 GICS sectors (BL-01)
-    TICKERS_30 = [
-        # Information Technology (5)
-        "AAPL", "MSFT", "NVDA", "AVGO", "CRM",
-        # Financials (4)
-        "JPM", "GS", "MA", "BRK-B",
-        # Health Care (3)
-        "JNJ", "UNH", "LLY",
-        # Consumer Discretionary (3)
-        "AMZN", "TSLA", "HD",
-        # Consumer Staples (2)
-        "PG", "KO",
-        # Energy (2)
-        "XOM", "CVX",
-        # Industrials (3)
-        "CAT", "BA", "RTX",
-        # Communication Services (3)
-        "META", "GOOGL", "DIS",
-        # Materials (2)
-        "LIN", "APD",
-        # Utilities (2)
-        "NEE", "DUK",
-        # Real Estate (1)
-        "PLD",
-    ]
-
-    parser = argparse.ArgumentParser(description="DyFO link prediction pre-training")
+    parser = argparse.ArgumentParser(
+        description="DyFO link prediction pre-training (standalone)",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument(
         "--variant",
         choices=["tgn", "ra_htgn", "gat_static", "roland", "temporal_kg"],
         default="tgn",
-        help="Encoder variant (default: tgn)",
+        help="Encoder variant",
     )
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--lr", type=float, default=2e-4)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--epochs", type=int, default=10, help="Training epochs")
+    parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument(
+        "--start",
+        default="2020-01-01",
+        help="Start date for data download (YYYY-MM-DD)",
+    )
+    parser.add_argument(
+        "--end",
+        default="2024-12-31",
+        help="End date for data download (YYYY-MM-DD)",
+    )
+    parser.add_argument(
+        "--n_tickers",
+        type=int,
+        choices=[30, 50, 100],
+        default=30,
+        help="Universe size: 30 / 50 / 100",
+    )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=5,
+        help="Early stopping patience (epochs without improvement)",
+    )
     args = parser.parse_args()
 
+    _tickers = get_tickers(args.n_tickers)
+
     test_metrics = train_link_prediction(
-        tickers=TICKERS_30,
-        start="2020-01-01",
-        end="2024-12-31",
+        tickers=_tickers,
+        start=args.start,
+        end=args.end,
         benchmark="SPY",
         num_epochs=args.epochs,
         lr=args.lr,
         corr_threshold=0.3,
         neg_ratio=1.0,
-        early_stopping_patience=5,
+        early_stopping_patience=args.patience,
         weight_decay=1e-4,
         pos_weight=1.0,
         mode="regression",

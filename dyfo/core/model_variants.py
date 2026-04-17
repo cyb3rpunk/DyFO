@@ -12,11 +12,13 @@ Use ``build_encoder(config, num_nodes)`` to instantiate the right variant.
 
 Variants
 --------
-"tgn"        — original DyFO Temporal Graph Network (DyFOModule wrapper)
-"ra_htgn"    — relation-aware heterogeneous TGN with semantic relation fusion
-"gat_static" — 2-layer GAT on a static mean-correlation graph (GATStaticEncoder)
-"roland"     — ROLAND-like monthly snapshot GNN with EMA state update
-               (ROLANDLikeEncoder; see roland_baseline.py for caveats)
+"tgn"         — original DyFO Temporal Graph Network (DyFOModule wrapper)
+"tgat"        — Temporal Graph Attention Network (Xu et al., ICLR 2020)
+                transformer baseline: Time2Vec + MH attention over k recent
+                events + GAT readout. Stateless (no GRU memory).
+"ra_htgn"     — relation-aware heterogeneous TGN with semantic relation fusion
+"gat_static"  — 2-layer GAT on a static mean-correlation graph
+"roland"      — ROLAND-like monthly snapshot GNN with EMA state update
 "temporal_kg" — interpretable temporal knowledge-graph encoder for BL-18
 """
 
@@ -224,6 +226,11 @@ def build_encoder(
     if v == "tgn":
         return TGNWrapper(config, num_nodes)
 
+    if v == "tgat":
+        from dyfo.core.tgat_encoder import TGATEncoder
+
+        return TGATEncoder(config, num_nodes)
+
     if v == "ra_htgn":
         from dyfo.core.relation_aware_tgn import RAHTGNEncoder
 
@@ -246,5 +253,5 @@ def build_encoder(
 
     raise ValueError(
         f"Unknown model_variant {v!r}. "
-        "Valid choices: 'tgn', 'ra_htgn', 'gat_static', 'roland', 'temporal_kg'."
+        "Valid choices: 'tgn', 'tgat', 'ra_htgn', 'gat_static', 'roland', 'temporal_kg'."
     )

@@ -14,9 +14,10 @@ class DyFOConfig:
         "roland",
         "temporal_kg",
         "tgn",
+        "tgat",
     }
 
-    model_variant: str = "tgn"  # Encoder variant: "tgn", "roland", "gat_static", "ra_htgn", or "temporal_kg"
+    model_variant: str = "tgn"  # Encoder variant: "tgn", "tgat", "roland", "gat_static", "ra_htgn", "temporal_kg"
 
     # --- Graph dimensions ---
     memory_dim: int = 172
