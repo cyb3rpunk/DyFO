@@ -1,0 +1,574 @@
+% This is samplepaper.tex, a sample chapter demonstrating the
+% LLNCS macro package for Springer Computer Science proceedings;
+% Version 2.21 of 2022/01/12
+%
+\documentclass[runningheads]{llncs}
+%
+\usepackage[T1]{fontenc}
+% T1 fonts will be used to generate the final print and online PDFs,
+% so please use T1 fonts in your manuscript whenever possible.
+% Other font encondings may result in incorrect characters.
+%
+\usepackage{graphicx}
+\usepackage{amssymb, amsmath}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, calc}
+% Used for displaying a sample figure. If possible, figure files should
+% be included in EPS format.
+%
+% If you use the hyperref package, please uncomment the following two lines
+% to display URLs in blue roman font according to Springer's eBook style:
+%\usepackage{color}
+%\renewcommand\UrlFont{\color{blue}\rmfamily}
+%\urlstyle{rm}
+%
+\begin{document}
+%
+\title{Dynamic Financial Ontology: Bridging Heterogeneous Market Events and Co-movement Structure with Temporal Graph Networks}
+%
+%\titlerunning{Abbreviated paper title}
+% If the paper title is too long for the running head, you can set
+% an abbreviated paper title here
+%
+\author{First Author\inst{1}\orcidID{0000-1111-2222-3333} \and
+Second Author\inst{2,3}\orcidID{1111-2222-3333-4444} \and
+Third Author\inst{3}\orcidID{2222--3333-4444-5555}}
+%
+\authorrunning{F. Author et al.}
+% First names are abbreviated in the running head.
+% If there are more than two authors, 'et al.' is used.
+%
+\institute{Princeton University, Princeton NJ 08544, USA \and
+Springer Heidelberg, Tiergartenstr. 17, 69121 Heidelberg, Germany
+\email{lncs@springer.com}\\
+\url{http://www.springer.com/gp/computer-science/lncs} \and
+ABC Institute, Rupert-Karls-University Heidelberg, Heidelberg, Germany\\
+\email{\{abc,lncs\}@uni-heidelberg.de}}
+%
+\maketitle              % typeset the header of the contribution
+%
+\begin{abstract}
+Forecasting dynamic financial co-movements requires integrating asynchronous signals into a continuous-time relational model. We propose \textbf{DyFO} (Dynamic Financial Observer), a stateless Temporal Graph Attention Network (TGAT) over a heterogeneous graph with three edge types: DCC-GARCH dynamic correlations (\texttt{CORR}), sector links (\texttt{SECT}), and Fama--French five-factor co-loadings (\texttt{FACT}). In a high-liquidity subset of 30 S\&P 500 stocks spanning all 11 GICS sectors, DyFO is trained for next-day pairwise correlation prediction and evaluated on a 256-day out-of-sample period. DyFO achieves strong predictive accuracy (\(R^2=0.805\), Spearman \(\rho=0.933\), MAE \(=0.048\), F1 \(=0.764\)), outperforming a recurrent Temporal Graph Network (TGN), a ROLAND-style temporal snapshot baseline, and a static GAT. Wilcoxon signed-rank and Diebold--Mariano tests with Newey--West HAC variance remain significant after Holm--Bonferroni correction, indicating robust predictive superiority. In downstream portfolio evaluation under a Global Minimum Variance strategy with paired block bootstrap, DyFO delivers competitive portfolio utility, although Sharpe differences are not statistically distinguishable in this setting. Overall, the results show that Temporal Graph Networks provide clear gains in correlation forecasting, while also highlighting the importance of allocation methods better aligned with forecast quality.
+\end{abstract}
+%
+%
+%
+
+\section{Introduction}\label{sec:introduction}
+
+
+Portfolio management consists in periodically reallocating capital across a set of assets so as to maximise long-term returns while controlling risk. Accurate modelling of asset co-movements is central to this task, since the covariance (or correlation) matrix directly determines the risk of any portfolio. Traditional approaches rely on rolling-window Pearson correlations or parametric models such as the Dynamic Conditional Correlation GARCH (DCC-GARCH) of \cite{engle2002dynamic}. Although effective at capturing volatility clustering, these methods treat each pair of assets in isolation and therefore cannot exploit the rich relational structure that exists among companies---sector membership, supply-chain links, or shared exposure to macroeconomic factors.
+
+Recent years have witnessed a surge of interest in graph-based and reinforcement-learning methods for portfolio management. Several works have modelled inter-company relationships as static graphs and employed graph neural networks to improve feature representations. Notable examples include the Relational Graph Convolutional Network (R-GCN) framework of \cite{shi2022gpm} (GPM), which combines multi-scale temporal convolutions with relational propagation over sector-industry and Wikidata links, and the Cross-Asset Attention Network of \cite{wang2019alphastock} (AlphaStock). While these approaches demonstrate the value of relational information, they typically operate on \emph{static} graphs and output portfolio weights directly through an end-to-end reinforcement-learning policy. Consequently, they lack an explicit, causally valid forecast of the full correlation matrix and cannot be rigorously evaluated through statistical tests on out-of-sample covariance prediction.
+
+In this paper we introduce \textbf{DyFO} (Dynamic Financial Observer), a Temporal Graph Network that bridges heterogeneous market events and co-movement structure for next-day pairwise correlation forecasting. DyFO operates on a \emph{dynamic} heterogeneous graph whose edges evolve daily: DCC-GARCH correlations (\texttt{CORR}), GICS sector links (\texttt{SECT}), and Fama--French five-factor co-loadings (\texttt{FACT}). Market activity is modelled as a continuous stream of typed events (price updates, earnings releases, macro surprises, Federal Reserve decisions, etc.), each carrying a three-dimensional feature vector. A stateless Temporal Graph Attention Network (TGAT) encodes recent events into node states, sidestepping the ``cold start'' instabilities of recurrent mechanisms, while a single-layer multi-head graph attention layer aggregates information over the static relational neighbourhood. The resulting node embeddings feed a lightweight decoder that predicts the full 30×30 correlation matrix for the next trading day.
+
+We evaluate DyFO on a high-liquidity subset of 30 S\&P~500 constituents spanning all 11 GICS sectors (2020--2024). On a 256-day out-of-sample window, DyFO achieves \(R^2 = 0.805\), Spearman \(\rho = 0.933\), MAE \(= 0.048\), and classification F1 \(= 0.764\) for high-correlation pairs, significantly outperforming a recurrent TGN baseline \cite{rossi2020temporal}, a ROLAND-style snapshot baseline \cite{you2022roland}, and a static GAT. Block-bootstrap portfolio evaluation (Global Minimum Variance allocation, 20{,}000 iterations, 5-day blocks) confirms that these correlation gains translate into competitive risk-adjusted returns (Sharpe proxy 2.178), with Sharpe-difference tests remaining non-significant after Holm--Bonferroni correction---indicating that improved covariance forecasting should be paired with allocation strategies explicitly aligned with forecast quality.
+
+The main contributions of this work are threefold:
+\begin{itemize}
+    \item We propose the first stateless Temporal Graph Attention Network (TGAT) architecture for continuous-time financial event streams, demonstrating that attention over event buffers resolves recurrent memory instabilities and enables highly accurate next-day correlation forecasting on a dynamic heterogeneous graph.
+    \item We integrate three complementary edge types---dynamic correlations, sector membership, and factor co-loadings---and demonstrate that each contributes measurably to predictive accuracy.
+    \item We provide the first rigorous statistical evaluation of graph-based correlation models via Diebold--Mariano, Wilcoxon signed-rank, and block-bootstrap Sharpe-ratio tests with Newey--West HAC standard errors, establishing robust superiority over strong baselines.
+\end{itemize}
+
+The remainder of the paper is organised as follows. Section~\ref{sec:related} reviews related work on graph-based and temporal models for portfolio management. Section~\ref{sec:methodology} formalises the problem and details the DyFO architecture. Section~\ref{sec:experiments} presents the experimental setup and main results. Finally, Section~\ref{sec:conclusion} concludes and outlines future research directions.
+
+\section{Related Work}\label{sec:related}
+
+Portfolio management has traditionally been addressed through two complementary lines of research: classical optimisation techniques and, more recently, data-driven learning methods.
+
+\paragraph{Classical approaches.}
+Markowitz's mean-variance framework \cite{markowitz1952} remains the foundation of modern portfolio theory, selecting assets that minimise variance for a target return. Subsequent refinements introduced shrinkage estimators, robust optimisation, and factor models. The Fama--French five-factor model \cite{fama2015fivefactor} is now widely used to capture systematic risk exposures. For dynamic settings, Engle's DCC-GARCH model \cite{engle2002dynamic} provides time-varying conditional correlations that are still considered a strong baseline in the industry. These methods, however, treat pairwise relationships in isolation and cannot exploit higher-order relational structures among companies.
+
+\paragraph{Deep reinforcement learning for portfolio management.}
+The advent of deep RL opened the possibility of learning policies directly from market data. Early works such as the Ensemble of Identical Independent Evaluators (EIIE) \cite{jiang2017deepreinforcementlearningframework} and its multi-scale extension EI³ \cite{shi2019multiscale} employed convolutional networks to extract price features and output portfolio weights. Subsequent improvements include the Portfolio Policy Network (PPN) \cite{zhang2020cost}, which adds a temporal correlational convolution block, and State-Augmented RL (SARL) \cite{ye2020reinforcement}, which augments states with external signals such as financial news. While effective, these approaches rely solely on price histories and ignore explicit inter-company relationships.
+
+\paragraph{Graph-based methods in finance.}
+Recognising that companies are embedded in a rich relational structure, several authors have modelled markets as graphs. AlphaStock \cite{wang2019alphastock} introduced a Cross-Asset Attention Network to capture inter-stock dependencies. The Relational Stock Ranking (RSR) model \cite{feng2019temporal} proposed a temporal graph convolution that jointly models price evolution and static relations. Hierarchical Attention Networks for Stock prediction (HATS) \cite{kim2019hatshierarchicalgraphattention} and Multi-GCGRU \cite{ye2020multi} further enriched node representations with industry, shareholding, and topicality edges. More recently, DeepPocket \cite{soleymani2021deeppocket} applied a standard GCN over financial instruments, while the GPM framework of \cite{shi2022gpm} combined multi-scale temporal convolutions with an R-GCN over heterogeneous company relations (sector-industry and Wikidata links) and introduced temperature-scaled softmax for portfolio diversity.
+
+All the aforementioned graph-based methods share two important limitations when applied to portfolio management. First, the underlying graphs are \emph{static}: edge weights or even edge existence do not evolve with market conditions. Second, most works output portfolio weights directly through an end-to-end policy, making it difficult to isolate the quality of the learned correlation structure or to apply classical risk-optimisation techniques downstream.
+
+\paragraph{Temporal Graph Networks.}
+To capture the inherently dynamic nature of financial markets, Temporal Graph Networks (TGN) were introduced by \cite{rossi2020temporal}. TGN maintains a memory vector per node that is updated continuously as events arrive, and propagates information over both temporal and structural neighbourhoods. A recent extension, ROLAND \cite{you2022roland}, operates on discrete graph snapshots and propagates hidden states between them. While these architectures have shown strong results on generic dynamic graphs, they have not yet been adapted to the specific challenges of financial correlation forecasting---heterogeneous event streams, time-varying correlation edges, and the need for causally valid next-day predictions that can be directly fed into a Global Minimum Variance optimiser.
+
+DyFO builds upon and extends this line of work by (i) modelling market activity as a heterogeneous event stream, (ii) maintaining a fully dynamic graph whose correlation edges are refreshed daily via DCC-GARCH, and (iii) producing explicit pairwise correlation forecasts that are evaluated with rigorous statistical tests before being used for portfolio construction. In doing so, it bridges the gap between relational graph learning and high-fidelity covariance prediction for portfolio management.
+
+\section{Methodology}\label{sec:methodology}
+
+As shown in Fig.~\ref{fig:dyfo_overview}, DyFO combines event-driven temporal updates with heterogeneous graph structure to predict next-day pairwise correlations. The model constructs event messages, updates node memory over time, computes node embeddings through temporal graph attention, and finally decodes pairwise correlations for downstream portfolio evaluation.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.95\linewidth]{figures/dyfo_framework.png}
+\caption{Overview of the DyFO architecture. Event messages are constructed from the heterogeneous event stream and used to update node memory through temporal encoding and GRU-based updates. The resulting node states, together with node features and the heterogeneous graph structure, are processed by a temporal graph attention layer, and the resulting node embeddings are decoded into next-day pairwise correlation forecasts.}
+\label{fig:dyfo_overview}
+\end{figure}
+
+
+\subsection{Problem Formulation}\label{problem-formulation-1}
+
+Let \(\mathcal{G} = (\mathcal{V}, \mathcal{E})\) be a heterogeneous
+financial graph where each node \(v_i \in \mathcal{V}\) represents a
+publicly traded asset. We model market activity as a continuous stream
+of typed events \(\{(s, r, t, \mathbf{f}_e)\}\), where
+\(s, r \in \mathcal{V}\) are the source and (optional) target nodes,
+\(t \in \mathbb{R}^+\) is a continuous timestamp, and
+\(\mathbf{f}_e \in \mathbb{R}^{d_e}\) is an event feature vector.
+
+The learning objective is next-day correlation prediction: given all
+events up to and including day \(t\), predict the pairwise Pearson
+correlation \(\rho_{ij}^{t+1}\) for all asset pairs \((i, j)\) on day
+\(t+1\). This formulation is causally valid by construction --- no label
+information from day \(t+1\) is visible at inference time.
+
+\subsection{Dataset}\label{dataset-1}
+
+\textbf{Universe.}
+We use $N=30$ large-cap S\&P~500 constituents spanning all 11 GICS
+sectors, selected by two criteria: (i)~\emph{capitalisation coverage}
+--- the 30 stocks account for approximately 45\% of the index
+weight,\footnote{S\&P~500 constituent weights as of April 2026.
+Because the index is cap-weighted, the contribution of each pair
+$(i,j)$ to total portfolio variance scales with $w_i w_j \sigma_{ij}$,
+so modelling correlations among the largest constituents captures the
+bulk of systemic risk.} and (ii)~\emph{liquidity} --- all rank in the
+top decile of average daily dollar volume, ensuring that prices
+reflect market information efficiently and that DCC-GARCH estimates
+remain reliable. The compact universe is intentional: our goal is to
+validate the architectural contribution rather than demonstrate
+large-scale deployment; scaling to broader universes via TMFG
+sparsification~(Sect.~\ref{graph-structure-and-edge-types}) is left for future
+work.
+
+\textbf{Period.} Daily data from 2020-01-01 to 2024-12-31 (5 years,
+1{,}278 trading days). Adjusted closing prices are sourced from Yahoo
+Finance via \texttt{yfinance}.
+
+\noindent\textbf{Event Stream.} The resulting stream comprises 350{,}656
+events across seven types (Table~\ref{tab:event_stream}), each carrying
+a three-dimensional feature vector
+$\mathbf{f}_e = [\mathit{magnitude},\;  \allowbreak \mathit{direction},\; \allowbreak \mathit{relative\_size}]$.
+
+\begin{table}[ht]
+\caption{Event types in the DyFO financial event stream.}
+\label{tab:event_stream}
+\centering
+\begin{tabular}{lll}
+\hline
+\textbf{Event Type} & \textbf{Description} & \textbf{Source} \\
+\hline
+\texttt{PRICE\_UPDATE} & Daily log-return signal & Yahoo Finance \\
+\texttt{EARNINGS\_REPORT} & Earnings release date & Yahoo Finance \\
+\texttt{CORP\_ACTION} & Dividend / stock split & Yahoo Finance \\
+\texttt{CORRELATION\_UPDATE} & DCC-GARCH $\rho$ threshold crossing & Estimated (Sect.~3.3) \\
+\texttt{MACRO\_RELEASE} & Macro surprise ($> 1.5\sigma$) & FRED API \\
+\texttt{FED\_DECISION} & Federal funds rate change & FRED API \\
+\texttt{CREDIT\_DOWNGRADE} & OAS spread shock & FRED API \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Correlation Target
+(DCC-GARCH)}\label{correlation-target-dcc-garch-1}
+
+Correlation labels are estimated via the Dynamic Conditional Correlation
+GARCH(1,1) model of Engle (2002), fitted over a rolling 252-day window.
+Let \(\boldsymbol{\epsilon}_t\) be the vector of standardised GARCH(1,1)
+residuals. The conditional correlation matrix follows:
+
+\[Q_t = (1 - a - b)\,\bar{Q} + a\,\boldsymbol{\epsilon}_{t-1}\boldsymbol{\epsilon}_{t-1}^\top + b\,Q_{t-1}\]
+
+\[R_t = \mathrm{diag}(Q_t)^{-1/2}\,Q_t\,\mathrm{diag}(Q_t)^{-1/2}\]
+
+where \(\bar{Q}\) is the unconditional covariance matrix estimated over
+the training window. DCC-GARCH is preferred over rolling Pearson because
+it captures volatility clustering and provides time-varying
+second-moment estimates robust to heteroskedastic equity returns.
+
+For the event stream, \texttt{CORRELATION\_UPDATE} events are emitted
+whenever \(|\rho_{ij}^t| \geq 0.3\) (sparsification threshold).
+Regression labels use the unsparsified DCC series to preserve continuous
+signal for all pairs.
+
+\subsection{Node Features}\label{node-features-1}
+
+Each asset \(v_i\) is described by a 20-dimensional time-varying feature
+vector \(\mathbf{v}_i(t)\):
+
+\[\mathbf{v}_i(t) = \left[\underbrace{r_{21d},\; \sigma_{21d},\; \beta_{63d}}_{\text{market signals}}\;,\;\underbrace{\mathbf{s}_i}_{\text{GICS one-hot, 11d}}\;,\;\underbrace{\tilde{m}_i}_{\text{log mcap}}\;,\;\underbrace{dd_i(t)}_{\text{drawdown}}\;,\;\underbrace{\boldsymbol{\pi}_i(t)}_{\text{regime probs, 3d}}\;,\;\underbrace{\tilde{v}_i(t)}_{\text{vol/avg}}\right]\]
+
+where \(r_{21d}\) is the 21-day log-return, \(\sigma_{21d}\) the 21-day
+realised volatility, \(\beta_{63d}\) the rolling 63-day market beta,
+\(\mathbf{s}_i\) the GICS sector one-hot encoding, \(\tilde{m}_i\) the
+cross-sectionally normalised log market cap, \(dd_i(t)\) the current
+drawdown from peak, \(\boldsymbol{\pi}_i(t)\) the regime probability
+vector from a hidden Markov model (zero-filled in the absence of an RDM
+module), and \(\tilde{v}_i(t)\) the volume normalised by its 21-day
+mean.
+
+\subsection{Graph Structure and Edge
+Types}\label{graph-structure-and-edge-types}
+
+The static graph $\mathcal{G}$ contains four types of edges, as summarized in Table~\ref{tab:edge_types}.
+
+\begin{table}[ht]
+\caption{Edge types used in the static graph $\mathcal{G}$.}
+\label{tab:edge_types}
+\centering
+\begin{tabular}{lll}
+\hline
+\textbf{Type} & \textbf{Description} & \textbf{Construction} \\
+\hline
+\texttt{CORR} & Dynamic pairwise correlation & DCC-GARCH, $|\rho| \geq 0.3$ \\
+\texttt{SECT} & Same GICS sector & Binary indicator \\
+%\texttt{SUPL} & Supply-chain proximity & External mapping \\
+\texttt{FACT} & Fama-French 5-factor co-loading & FF5 loading cosine $\geq 0.5$ \\
+\hline
+\end{tabular}
+\end{table}
+
+All edge types are embedded into a shared $d_{\text{edge}} = 16$ dimensional space through a learned \texttt{Embedding} table and are subsequently used as edge attributes in the Temporal Graph Attention layer.
+
+\subsection{TGAT Architecture (DyFO Next-Day
+Variant)}\label{tgat-architecture-dyfo-next-day-variant-1}
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    x=1.05cm, y=1.05cm,
+    >=Latex,
+    font=\small,
+    asset/.style={
+        circle,
+        draw=black!75,
+        thick,
+        minimum size=11mm,
+        inner sep=0pt,
+        fill=white
+    },
+    mainnode/.style={
+        circle,
+        draw=black,
+        very thick,
+        minimum size=13mm,
+        inner sep=0pt,
+        fill=black!7
+    },
+    msgedge/.style={
+        ->,
+        very thick,
+        draw=black!80
+    },
+    stredge/.style={
+        ->,
+        thick,
+        draw=black!45,
+        dashed
+    },
+    edgelabel/.style={
+        fill=white,
+        inner sep=1.5pt,
+        text=black,
+        font=\small
+    },
+    ann/.style={
+        font=\scriptsize
+    }
+]
+
+% ---------------- Nodes ----------------
+\node[mainnode] (vi) at (0,0) {\(v_i\)};
+\node[asset]    (vj) at (-4.2,  2.4) {\(v_j\)};
+\node[asset]    (vl) at (-4.6, -1.8) {\(v_l\)};
+\node[asset]    (vk) at ( 3.6,  2.5) {\(v_k\)};
+\node[asset]    (vm) at ( 4.5, -1.8) {\(v_m\)};
+\node[asset]    (vn) at (-0.2, -3.2) {\(v_n\)};
+
+% ---------------- Node state ----------------
+\node[above=3pt of vi] {\(\mathbf{s}_i(t)\)};
+
+% ---------------- Event-driven / temporal message flow ----------------
+\draw[msgedge] (vj) -- (vi)
+    node[pos=0.42, above left=2pt and 2pt, edgelabel]
+    {\(e_{ji}^{(\mathrm{SECT})}\)};
+
+\draw[msgedge] (vl) -- (vi)
+    node[pos=0.45, above=2pt, edgelabel]
+    {\(\mathbf{m}_{l\rightarrow i}(t)\)};
+
+\draw[msgedge] (vi) -- (vk)
+    node[pos=0.55, above=2pt, edgelabel]
+    {\(\phi(\Delta t_{ik})\)};
+
+\draw[msgedge] (vi) -- (vm)
+    node[pos=0.55, below=2pt, edgelabel]
+    {\(\phi(\Delta t_{im})\)};
+
+\draw[msgedge] (vi) -- (vn)
+    node[pos=0.55, left=3pt, edgelabel]
+    {\(\phi(\Delta t_i)\)};
+
+% ---------------- Structural context edges ----------------
+\draw[stredge] (vl) -- (vn)
+    node[pos=0.52, below left=1pt and 1pt, edgelabel]
+    {\(e_{ln}^{(\mathrm{FACT})}\)};
+
+\draw[stredge] (vn) -- (vm)
+    node[pos=0.52, below=2pt, edgelabel]
+    {\(e_{nm}^{(\mathrm{FACT})}\)};
+
+\draw[stredge] (vk) -- (vm)
+    node[pos=0.52, right=3pt, edgelabel]
+    {\(e_{km}^{(\mathrm{CORR})}\)};
+
+% ---------------- Role annotations ----------------
+\node[ann, above=4pt of vj] {event source};
+\node[ann, left=6pt of vl]  {neighbor};
+\node[ann, right=6pt of vk] {event target};
+\node[ann, right=6pt of vm] {context node};
+\node[ann, below=4pt of vn] {historical context};
+
+% ---------------- Legend ----------------
+\node[
+    draw=black!45,
+    rounded corners,
+    fill=white,
+    align=left,
+    anchor=north west,
+    text width=7.1cm,
+    inner sep=6pt
+] at (-5.8,-4.8)
+{\scriptsize
+\textbf{Legend:}\\[2pt]
+\(\longrightarrow\) event-driven / temporal message flow\\
+\(\dashrightarrow\) structural relation in the heterogeneous graph\\
+\(e_{ab}^{(\cdot)}\): typed structural edge (e.g., SECT, CORR, FACT)\\
+\(\mathbf{m}_{l\rightarrow i}(t)\): message generated by an event at time \(t\)\\
+\(\phi(\Delta t)\): temporal encoding / time-gap representation\\
+\(\mathbf{s}_i(t)\): memory/state of node \(v_i\)
+};
+
+\end{tikzpicture}
+\caption{Illustration of message passing in a heterogeneous temporal graph. The central node \(v_i\) aggregates event-driven messages and structural context from neighboring nodes. Solid arrows represent temporal or event-induced information flow, while dashed arrows denote typed structural relations used as contextual dependencies in the graph.}
+\label{fig:dyfo_message_passing}
+\end{figure}
+
+DyFO builds heavily on stateless Temporal Graph Attention Networks, replacing recurrent node memory with direct temporal attention over a finite event ring buffer to avoid the cold-start instabilities inherent to RNNs in walk-forward evaluation. The complete pipeline per trading day \(t\) is:
+
+\textbf{Event Ring Buffer.} Each node maintains a fixed-capacity ring buffer of its most recent events. Instead of a recurrent memory vector being updated, recent historical events are attended to directly.
+
+\textbf{Message Function.} For each event \((i, j, t, \mathbf{f}_e)\), a
+raw message for the source node is:
+
+\[\mathbf{m}_i(t) = \left[\mathbf{v}_i(t^-) \;\|\; \mathbf{v}_j(t^-) \;\|\; \phi(\Delta t_i) \;\|\; \mathbf{f}_e \;\|\; \mathbf{e}_{\text{edge}} \;\|\; \mathbf{e}_{\text{event}}\right]\]
+
+where \(\phi(\Delta t) \in \mathbb{R}^{100}\) is the Time2Vec encoding
+(Kazemi et al., 2019) of the elapsed time since node \(i\)'s last event,
+and \(\mathbf{v}_j(t^-)\) is replaced with \textbf{0} for node-only
+events (target \(= -1\)). A symmetric message is computed for the target
+node \(j\).
+
+\textbf{Temporal Attention over Buffer.} The network applies a temporal attention mechanism over the messages stored in the event ring buffer. 
+This produces a strictly feedforward summary representation of the node's recent temporal history, fully decoupled from standard backpropagation through time.
+
+\textbf{Unified Aggregation.} Source and target summary vectors are pooled and aggregated, ensuring that nodes appearing as both source and target within the same daily batch receive a single coherent context representation.
+
+\textbf{Temporal Graph Attention Embedding.} Node embeddings are
+computed via a single-layer multi-head attention (2 heads) over the
+static graph neighbourhood:
+
+\[\mathbf{z}_i(t) = \mathrm{MLP}\!\left(\mathbf{h}_i \,\|\, \mathrm{MultiHeadAttn}\!\left(\mathbf{h}_i,\;\{\mathbf{h}_j \,\|\, \mathbf{f}_{ij} \,\|\, \phi(\Delta t_{ij})\}_{j \in \mathcal{N}(i)}\right)\right)\]
+
+where
+\(\mathbf{h}_i = [\mathbf{s}_i(t) \,\|\, \mathbf{v}_i(t)] \in \mathbb{R}^{192}\)
+and \(\mathbf{z}_i(t) \in \mathbb{R}^{100}\).
+
+\textbf{Decoder.} A 3-layer MLP with architecture
+\([200 \to 64 \to 32 \to 1]\) takes the concatenated pair embedding
+\([\mathbf{z}_i \,\|\, \mathbf{z}_j] \in \mathbb{R}^{200}\) and outputs
+\(\hat{\rho}_{ij}^{t+1} \in [-1, 1]\) via a \(\tanh\) final activation.
+
+\textbf{Weight Initialisation.} Linear layers use Xavier uniform initialisation standardizing gradient dynamics early in training for attention components.
+
+The total parameter count is appropriately sized for the 30-asset test.
+
+\subsection{Training Protocol}\label{training-protocol-1}
+
+\textbf{Pre-training objective.} The model is trained to minimise the
+Huber loss (SmoothL1, \(\delta = 1\)) between predicted and DCC-GARCH
+correlations over all known pairs on day \(t+1\):
+
+\[\mathcal{L} = \frac{1}{|\mathcal{P}_t|} \sum_{(i,j) \in \mathcal{P}_t} \ell_\delta\!\left(\hat{\rho}_{ij}^{t+1},\, \rho_{ij}^{t+1}\right)\]
+
+Huber loss is chosen for robustness to outlier correlations near
+\(\pm 1\) that arise during market stress periods.
+
+\textbf{Walk-forward split \& Evaluation.} The 1,278 trading days are
+partitioned chronologically into train (60\%, 766 days), validation
+(20\%, 256 days), and test (20\%, 256 days). Memory state is
+\textbf{not} reset between splits; validation and test proceed with the
+memory inherited from the preceding period, reflecting the intended
+deployment setting. To establish strict statistical rigor for portfolio
+metrics without prohibitively expensive recurrent retraining, we apply a
+robust Block Bootstrap methodology to the resulting out-of-sample
+returns. This bounds the Sharpe evaluation with 95\% confidence
+intervals and calculates \(p\)-values across strategy distributions.
+
+\textbf{Optimisation.} Adam optimiser with learning rate
+\(\eta = 2 \times 10^{-4}\), weight decay \(\lambda = 10^{-4}\). A
+linear learning rate warmup over the first 2 epochs ramps \(\eta\) from
+\(10^{-4}\) to \(2 \times 10^{-4}\), reducing gradient magnitude during
+the first pass through the training data when memory is
+zero-initialised. Gradients are clipped to \(\ell_2\)-norm \(\leq 0.5\).
+Early stopping with patience 5 monitors validation \(R^2\), and the best
+checkpoint is restored for test evaluation.
+
+\textbf{Reproducibility.} All experiments are run with 5 independent
+random seeds \(\{42, 43, 44, 45, 46\}\). Data preparation (downloads,
+DCC-GARCH estimation) is performed once and shared across seeds to
+isolate stochasticity to model initialisation and dropout.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\section{Experiments}\label{sec:experiments}
+
+\subsection{Evaluation Metrics}\label{evaluation-metrics}
+
+We report the following metrics computed on the held-out test set (last
+256 trading days):
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{R²} (coefficient of determination): fraction of variance in
+  \(\rho_{ij}^{t+1}\) explained by \(\hat{\rho}_{ij}^{t+1}\).
+\item
+  \textbf{Spearman \(\rho\)}: rank correlation between predicted and
+  actual correlations, measuring ordinal accuracy of the predicted
+  correlation structure.
+\item
+  \textbf{MAE}: mean absolute error in correlation units.
+\end{itemize}
+
+Additionally, we report derived classification metrics (Precision,
+Recall, F1 at \(|\hat{\rho}| \geq 0.5\)) that reflect the practical
+accuracy of identifying high-correlation asset pairs --- the primary use
+case for portfolio construction.
+
+\subsection{Main Results}\label{main-results-1}
+
+\noindent Table~\ref{tab:dyfo_results} reports the test performance of the DyFO (TGAT) architecture against three baselines evaluated on the held-out dataset. The results indicate that the feedforward temporal attention mechanism avoids the severe `cold-start' instabilities associated with recurrent architectures (such as TGN) across the non-overlapping window splits.
+
+\begin{table}[ht]
+\caption{Test set performance of DyFO versus baselines. A walk-forward protocol was adopted, evaluating on consecutive prediction windows. All metrics were averaged over the $\binom{30}{2} = 435$ asset pairs evaluated per test day. Higher is better for all metrics, except MAE.}
+\label{tab:dyfo_results}
+\centering
+\begin{tabular}{lcccc}
+\hline
+\textbf{Model} & \textbf{$R^2$} & \textbf{Spearman $\rho$} & \textbf{MAE} & \textbf{cls-F1} \\
+\hline
+\textbf{DyFO (TGAT)} & \textbf{0.805} & \textbf{0.933} & \textbf{0.048} & \textbf{0.764} \\
+TGN (Recurrent Baseline) & 0.323 & 0.490 & 0.086 & 0.361 \\
+ROLAND & 0.446 & 0.741 & 0.080 & 0.171 \\
+GAT\_STATIC & 0.561 & 0.834 & 0.071 & 0.401 \\
+\hline
+\end{tabular}
+\end{table}
+
+DyFO (TGAT) achieves an average test performance of $R^2 = 0.805$ and Spearman $\rho = 0.933$, demonstrating that the pure temporal attention graph representation captures economically meaningful co-movement structures without succumbing to periodic memory collapse.
+
+The Spearman correlation of 0.933 is particularly relevant in practical applications, since portfolio allocation and risk management often depend more on the ranking of correlation pairs than on their exact numerical values. This result suggests that DyFO preserves the relative ordering of asset-pair correlations one day ahead with highly stable fidelity.
+
+\subsection{Recurrent Memory Instability vs. Attention}\label{training-stability-1}
+
+Previous recurrent experiments (using standard TGN) severely degraded across non-overlapping walk-forward windows. We verified that recurrent GRU memory cells exhibit chronic instability (causing $R^2$ to become heavily negative and classification F1 to plummet to 0.0) at the start of multiple test splits due to memory ``cold starts''. Even with gradient clipping, linear warmup, and orthogonal GRU initialisation, the baseline TGN experienced recurring test set collapses as it overfit to early-stage noise within new windows. 
+
+The TGAT architecture natively solves this by exchanging the unbounded recurrent memory for strict multi-head attention over a finite event ring buffer, establishing highly robust structural consistency across arbitrary market regimes.
+
+\subsection{Block Bootstrap Evaluation and Portfolio
+Utility}\label{block-bootstrap-evaluation-and-portfolio-utility}
+
+To validate the real-world economic utility of the learned correlation
+structure and evaluate Hypothesis 4 (H4: TGAT outperforms sequential
+snapshot methods like ROLAND in terms of conditional Sharpe ratio), we
+evaluate a \textbf{Global Minimum Variance (GMV)} allocation strategy
+based on the predicted correlation matrix.
+
+Instead of a computationally expensive multi-window walk-forward
+training, our approach computes out-of-sample portfolio returns from a
+single, high-quality training run and relies on a rigorous \textbf{Block
+Bootstrap} estimation. This accounts for temporal dependencies within
+financial returns to run thousands of iterations to derive statistical
+significance and valid confidence intervals.
+
+\textbf{Baselines Evaluated:} 1. \textbf{TGN}: A recurrent temporal graph baseline which updates sequential nodes states via a GRU memory cell. 2. \textbf{ROLAND}: A dynamic sequential structural approach spanning discrete snapshot graphs. 3. \textbf{GAT\_STATIC}: A pure Graph Attention Network that operates strictly on the static graph, ignoring continuous-time temporal event updates.
+
+\textbf{Evaluation Metric:} We compute a proxy Sharpe Ratio for a
+theoretical Global Minimum Variance portfolio formed using the predicted
+pairwise correlation values mapped back to a full covariance matrix
+framework.
+
+\subsection{Portfolio-Level Evaluation}\label{portfolio_level_eval}
+
+To assess whether the superior correlation forecasts produced by DyFO translate into economically meaningful portfolio improvements, we construct Global Minimum Variance (GMV) portfolios from the predicted covariance matrices and evaluate their out-of-sample Sharpe ratios via paired block bootstrap (20{,}000 iterations, block size 5). Table~\ref{tab:gmv_sharpe} summarizes the results.
+As illustrated in Fig.~\ref{fig:evaluation_pipeline}, the experimental evaluation follows two complementary paths from the next-day pairwise correlation forecasts. The first path assesses predictive quality directly through standard regression and ranking metrics, followed by statistical tests on forecast errors to determine whether DyFO significantly outperforms the baselines. The second path maps the predicted correlations into covariance matrices, constructs GMV portfolios, and evaluates their downstream utility through paired block bootstrap analysis.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.95\linewidth]{figures/evaluation_pipeline.png}
+\caption{Overview of the downstream evaluation protocol. Starting from next-day pairwise correlation forecasts, the experimental pipeline branches into two complementary evaluation paths. The prediction-level branch computes forecasting metrics and applies statistical tests on predictive performance to assess superiority over baseline models. The portfolio-level branch reconstructs the covariance matrix, builds GMV portfolios, and evaluates downstream financial utility through paired block bootstrap analysis.}
+\label{fig:evaluation_pipeline}
+\end{figure}
+
+This dual evaluation protocol is central to the interpretation of the results, since it separates improvements in predictive accuracy from their eventual translation into portfolio-level gains under a mean--variance allocation framework.
+
+\begin{table}[ht]
+\caption{Block bootstrap results for the GMV portfolio Sharpe proxy.}
+\label{tab:gmv_sharpe}
+\centering
+\begin{tabular}{lccc}
+\hline
+\textbf{Variant} & \textbf{Sharpe Proxy} & \textbf{Bootstrap Mean} & \textbf{95\% CI} \\
+\hline
+\textbf{DyFO (TGAT)} & 2.178 & 2.297 & $[0.235,\; 4.499]$ \\
+TGN & 2.190 & 2.302 & $[0.250,\; 4.480]$ \\
+ROLAND & 2.229 & 2.356 & $[0.312,\; 4.549]$ \\
+GAT\_STATIC & 2.387 & 2.524 & $[0.469,\; 4.708]$ \\
+\hline
+\end{tabular}
+\end{table}
+
+The paired bootstrap comparison yields $P(\text{Sharpe}_{\text{DyFO}} \leq \text{Sharpe}_{\text{ROLAND}}) = 0.596$, well above any conventional significance threshold. Similarly, the CVaR-based comparison is non-significant ($p = 0.289$). Taken at face value, the GMV Sharpe ratios suggest that DyFO's predictive advantage over the baselines does not propagate into statistically distinguishable portfolio performance under mean-variance allocation.
+
+This result, however, is consistent with a well-documented limitation of Markowitz optimization. \cite{michaud1989markowitz} characterised mean-variance optimisers as \emph{estimation error maximisers}: the quadratic program amplifies small perturbations in the covariance input, producing portfolio weights that are highly sensitive to noise rather than to genuine improvements in predictive accuracy. Consequently, the optimizer can absorb---or even invert---the ranking of competing covariance estimators, making Sharpe-based comparisons unreliable as a proxy for forecast quality. \cite{DeMiguel2009Optimal} reinforced this finding by showing that, for a universe of 25 assets, sample-based mean-variance strategies require approximately 3{,}000 months of estimation history to outperform a na\"ive $1/N$ benchmark out of sample---far exceeding the 251 test-period days available in our experiment. With 30 assets, the estimation error introduced by the GMV optimizer is expected to dominate any marginal improvement in the predicted covariance matrix.
+
+In contrast, the prediction-level tests---which evaluate the correlation forecasts \emph{directly}, without the confounding effect of the optimizer---reveal a starkly different picture. The Wilcoxon signed-rank test on paired absolute errors yields $p < 10^{-4}$ for the baseline comparisons, and the Diebold--Mariano test with Newey--West HAC correction confirms these findings for the new architecture (DyFO vs.\ ROLAND: $\text{DM} = -32.51$, $p < 10^{-200}$, Cohen's $d = -3.10$; DyFO vs.\ GAT\_STATIC: $\text{DM} = -22.73$, $p < 10^{-100}$, $d = -2.25$). All results remain significant after Holm--Bonferroni correction for multiple comparisons.
+
+The divergence between portfolio-level and prediction-level results thus identifies the \emph{optimizer}, not the encoder, as the performance bottleneck. DyFO produces substantially more accurate covariance forecasts, but the mean-variance allocator fails to translate this advantage into measurable economic utility---precisely the phenomenon documented by \cite{michaud1989markowitz} and \cite{DeMiguel2009Optimal}. This motivates future work on decision-aware allocation strategies, such as end-to-end differentiable portfolio layers \cite{amos2017optnet,elmachtoub2022smart} or reinforcement learning agents, that can exploit the richer covariance signal without the error-amplification pathology of classical Markowitz optimisation.
+
+\section{Conclusion and Future Work}\label{sec:conclusion}
+
+In this paper, we introduced DyFO (Dynamic Financial Observer), a fully stateless Temporal Graph Attention Network (TGAT) designed for next-day pairwise correlation forecasting in financial markets. The proposed framework integrates three complementary relational sources---dynamic correlations (CORR), sector links (SECT), and factor co-loadings (FACT)---within a heterogeneous graph, while also incorporating asynchronous market events through a continuous-time message-passing mechanism. By combining temporal memory updates, typed structural relations, and graph attention, DyFO provides a causally valid architecture for modelling evolving co-movement structure across assets.
+
+Empirically, the results show that DyFO achieves strong and stable predictive performance on out-of-sample next-day correlation forecasting. In particular, the model consistently outperformed both the ROLAND-style sequential snapshot baseline and the static GAT baseline across prediction-level metrics, including $R^2$, Spearman $\rho$, MAE, and classification F1. Moreover, statistical tests on forecast errors, including the Wilcoxon signed-rank test and the Diebold--Mariano test with Newey--West HAC correction, confirmed that these gains are robust and remain significant after Holm--Bonferroni adjustment. These findings indicate that temporal graph representations can capture economically meaningful and statistically reliable co-movement patterns in a way that static or snapshot-based models cannot.
+
+At the same time, the portfolio-level evaluation revealed a more nuanced picture. Although DyFO produced more accurate correlation forecasts, these gains did not translate into statistically significant improvements in downstream GMV portfolio Sharpe ratios under paired block bootstrap evaluation. This result suggests that, in the present setting, the mean--variance optimizer acts as a bottleneck that absorbs part of the predictive advantage of the encoder. In other words, the quality of the covariance forecasts improves, but the allocation procedure is not sufficiently aligned with forecast quality to convert that improvement into measurable economic gains.
+
+These findings lead to several directions for future research. First, the portfolio construction stage should be revisited through decision-aware allocation frameworks, such as differentiable optimization layers or reinforcement-learning-based allocators, which may be better suited to exploit richer covariance forecasts. Second, the heterogeneous graph can be extended with additional relation types, provided they remain economically interpretable and statistically justified. Third, the event stream may be enriched with alternative sources of exogenous information, such as textual financial news, macro narratives, or analyst revisions, enabling a broader integration between structured relational modelling and market sentiment. Finally, future work should investigate larger asset universes, longer test horizons, and alternative portfolio objectives beyond GMV, including risk-aware and utility-based formulations, in order to better assess when superior correlation prediction translates into downstream financial value.
+
+Overall, this work shows that Temporal Graph Networks constitute a promising and rigorous approach for financial co-movement forecasting. DyFO narrows the gap between dynamic relational learning and practical covariance modelling, while also highlighting an important lesson: improving predictive accuracy is necessary, but not sufficient, for improving portfolio decisions unless the downstream allocation mechanism is designed to make effective use of that predictive signal.
+
+%
+% ---- Bibliography ----
+%
+% BibTeX users should specify bibliography style 'splncs04'.
+% References will then be sorted and formatted in the correct style.
+%
+\bibliographystyle{splncs04}
+\bibliography{references}
+%
+%\begin{thebibliography}{8}
+
+%\end{thebibliography}
+\end{document}

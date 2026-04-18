@@ -677,6 +677,7 @@ def train_link_prediction(
         if collect_predictions and all_preds:
             avg_metrics["_all_preds"] = torch.cat(all_preds)
             avg_metrics["_all_targets"] = torch.cat(all_targets)
+            avg_metrics["_n_pairs_per_day"] = [len(p) for p in all_preds]
             if realized_returns:
                 avg_metrics["_realized_returns"] = realized_returns
 
