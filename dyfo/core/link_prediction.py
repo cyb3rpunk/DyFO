@@ -362,6 +362,7 @@ def compute_regression_metrics(
 
     return {
         "loss": mse.item(),
+        "mse": mse.item(),
         "mae": mae.item(),
         "r_squared": r_squared.item(),
         "spearman": spearman.item(),

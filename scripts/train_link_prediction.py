@@ -507,6 +507,7 @@ def train_link_prediction(
         all_preds = []
         all_targets = []
         realized_returns = []
+        realized_weights = []
 
         # For Sharpe calculation: get daily returns
         price_returns = data["prices"].pct_change().fillna(0)
@@ -644,6 +645,7 @@ def train_link_prediction(
                         
                         # Optimize weights
                         weights = optimize_min_variance(cov)
+                        realized_weights.append(weights.copy())
                         
                         # Realized return tomorrow
                         # Convert tomorrow (float days since 2000) back to price index
@@ -655,14 +657,36 @@ def train_link_prediction(
         if num_batches > 0:
             avg_metrics = {k: v / num_batches for k, v in epoch_metrics.items()}
             
-            # --- Aggregated Sharpe ---
+            # --- Aggregated Sharpe & Risk Metrics ---
             if realized_returns:
                 rets = np.array(realized_returns)
                 if len(rets) > 1 and rets.std() > 0:
-                    sharpe = (rets.mean() / (rets.std() + 1e-8)) * np.sqrt(252)
+                    sharpe = float((rets.mean() / (rets.std() + 1e-8)) * np.sqrt(252))
+                    vol = float(rets.std() * np.sqrt(252))
                 else:
                     sharpe = 0.0
+                    vol = 0.0
+                
+                # MDD
+                cum = np.cumprod(1.0 + rets)
+                running_max = np.maximum.accumulate(cum)
+                dd = cum / running_max - 1.0
+                mdd = float(np.min(dd)) if len(dd) > 0 else 0.0
+                
+                # Turnover
+                if len(realized_weights) > 1:
+                    t_vals = [np.sum(np.abs(realized_weights[t] - realized_weights[t - 1])) / 2.0 for t in range(1, len(realized_weights))]
+                    turnover = float(np.mean(t_vals))
+                else:
+                    turnover = 0.0
+
+                cumret = float(np.prod(1.0 + rets) - 1.0) if len(rets) > 0 else 0.0
+
                 avg_metrics["sharpe_proxy"] = sharpe
+                avg_metrics["mdd_proxy"] = mdd
+                avg_metrics["turnover_proxy"] = turnover
+                avg_metrics["cumret_proxy"] = cumret
+                avg_metrics["vol_proxy"] = vol
         else:
             if is_regression:
                 avg_metrics = {

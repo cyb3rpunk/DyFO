@@ -92,6 +92,9 @@ ABLATION_BASIC: List[FrozenSet[str]] = [
 ABLATION_FULL: List[FrozenSet[str]] = ABLATION_BASIC + [
     frozenset({"CORR", "SECT", "FACT"}),  # all edges
 ]
+ABLATION_CORR_FACT: List[FrozenSet[str]] = [
+    frozenset({"CORR", "FACT"}),
+]
 
 _ABLATION_NAME: Dict[FrozenSet[str], str] = {
     frozenset({"CORR"}): "CORR_only",
@@ -111,15 +114,27 @@ DEFAULT_STEP_DAYS = 125   # non-overlapping
 DEFAULT_N_BOOTSTRAP = 2000
 DEFAULT_BLOCK_SIZE = 5
 DEFAULT_N_TICKERS = 30
+DEFAULT_SEEDS: List[int] = [42]
+MULTISEED_SEEDS: List[int] = [42, 123, 456, 789, 2024]
 
 
 # ---------------------------------------------------------------------------
 # Hyperparameter routing (Rev 1 fix, preserved)
 # ---------------------------------------------------------------------------
 
+# Rev3-specific: temporal_kg and ra_htgn converge slower (~20-30 epochs)
+# — they need higher patience and a cosine schedule to reach their optimum.
+TKG_LR = 1e-3
+TKG_USE_COSINE = True   # cosine annealing helps avoid plateau stagnation
+TKG_PATIENCE = 15       # 15 epochs no-improvement tolerance (vs 5 for TGAT)
+
+
 def _hyperparam_lr(variant: str) -> Tuple[float, bool, int]:
     """Return (lr, use_cosine, patience) for a given variant."""
-    if variant in {"tgn", "tgat", "ra_htgn", "temporal_kg"}:
+    if variant in {"temporal_kg", "ra_htgn"}:
+        # Slower-converging relational models need more patience + cosine LR
+        return TKG_LR, TKG_USE_COSINE, TKG_PATIENCE
+    if variant in {"tgn", "tgat"}:
         return TGN_LR, TGN_USE_COSINE, TGN_PATIENCE
     return BASELINE_LR, BASELINE_USE_COSINE, BASELINE_PATIENCE
 
@@ -230,6 +245,7 @@ def _train_window(
     train_dates: List[int],
     val_dates: List[int],
     test_dates: List[int],
+    seed: int = 42,
 ) -> dict:
     lr, use_cosine, patience = _hyperparam_lr(variant)
     return train_link_prediction(
@@ -240,7 +256,7 @@ def _train_window(
         num_epochs=epochs,
         mode="regression",
         model_variant=variant,
-        seed=42,
+        seed=seed,
         prepared_data=data,
         train_dates=train_dates,
         val_dates=val_dates,
@@ -250,6 +266,43 @@ def _train_window(
         use_cosine_schedule=use_cosine,
         early_stopping_patience=patience,
     )
+
+
+def _aggregate_multiseed_metrics(
+    all_seed_metrics: List[dict],
+    logger: logging.Logger,
+) -> dict:
+    """Average scalar metrics across seeds. Private tensors from first seed are kept."""
+    if len(all_seed_metrics) == 1:
+        return all_seed_metrics[0]
+
+    scalar_keys = [k for k in all_seed_metrics[0] if not k.startswith("_")]
+    aggregated: dict = {}
+    for k in scalar_keys:
+        vals = [m[k] for m in all_seed_metrics if k in m]
+        if vals:
+            aggregated[k] = float(np.nanmean(vals))
+
+    for k in ["r_squared", "mae", "mse", "spearman", "loss", "sharpe_proxy"]:
+        vals = [m.get(k, np.nan) for m in all_seed_metrics]
+        valid = [v for v in vals if not np.isnan(v)]
+        if len(valid) > 1:
+            aggregated[f"{k}_seed_std"] = float(np.std(valid, ddof=1))
+
+    # Keep private keys from first seed for downstream bootstrap
+    for k in all_seed_metrics[0]:
+        if k.startswith("_") and k not in aggregated:
+            aggregated[k] = all_seed_metrics[0][k]
+
+    logger.info(
+        "    Multi-seed (%d seeds): R²=%.4f±%.4f  MSE=%.6f±%.6f",
+        len(all_seed_metrics),
+        aggregated.get("r_squared", 0.0),
+        aggregated.get("r_squared_seed_std", 0.0),
+        aggregated.get("mse", 0.0),
+        aggregated.get("mse_seed_std", 0.0),
+    )
+    return aggregated
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +386,15 @@ def _run_normal(
             metrics = _train_window(
                 variant, data, start, end, tickers, epochs,
                 train_dates, val_dates, test_dates,
+            )
+            logger.info(
+                "  %s | w%d >> R²=%.4f  MAE=%.4f  MSE=%.4f  Spearman=%.4f  loss=%.6f",
+                variant.upper(), wi,
+                float(metrics.get("r_squared", float("nan"))),
+                float(metrics.get("mae", float("nan"))),
+                float(metrics.get("mse", metrics.get("loss", float("nan")))),
+                float(metrics.get("spearman", float("nan"))),
+                float(metrics.get("loss", float("nan"))),
             )
             scalar_results[variant].append(
                 {k: float(v) for k, v in metrics.items() if not k.startswith("_")}
@@ -460,7 +522,7 @@ def _run_normal(
             "mean_window_metrics": {
                 v: {
                     m: float(np.nanmean([e.get(m, np.nan) for e in scalar_results[v]]))
-                    for m in ["r_squared", "spearman", "mae", "loss", "cls_f1", "sharpe_proxy"]
+                    for m in ["r_squared", "spearman", "mae", "mse", "loss", "cls_f1", "sharpe_proxy", "mdd_proxy", "turnover_proxy", "cumret_proxy", "vol_proxy"]
                 } for v in variants
             },
         },
@@ -489,6 +551,7 @@ def _run_ablation(
     logger: logging.Logger,
     summary_out: dict,
     on_progress: Optional[callable] = None,
+    seeds: List[int] = DEFAULT_SEEDS,
 ) -> dict:
     n_pairs = N_PAIRS_BY_TICKERS.get(len(tickers), len(tickers) * (len(tickers) - 1) // 2)
     ablation_results: dict = {}
@@ -504,11 +567,46 @@ def _run_ablation(
         realized_returns: List[np.ndarray] = []
         daily_losses: List = []
 
-        for wi, (train_dates, val_dates, test_dates) in enumerate(windows, start=1):
-            logger.info("  Ablation window %d/%d [%s]", wi, len(windows), label)
-            metrics = _train_window(
-                ablation_variant, masked_data, start, end, tickers, epochs,
-                train_dates, val_dates, test_dates,
+        if label == "all_edges" and ablation_variant in summary_out.get("metrics_by_variant", {}) and len(summary_out["metrics_by_variant"][ablation_variant]) > 0:
+            logger.info("  Skipping redundant training for 'all_edges' - fetching baseline results from normal run.")
+            scalar_results = summary_out["metrics_by_variant"][ablation_variant]
+            windows_to_run = []
+        else:
+            windows_to_run = windows
+
+        for wi, (train_dates, val_dates, test_dates) in enumerate(windows_to_run, start=1):
+            logger.info("  Ablation window %d/%d [%s] (%d seeds)", wi, len(windows), label, len(seeds))
+            if len(seeds) > 1:
+                seed_metrics_list = []
+                for s_idx, seed in enumerate(seeds):
+                    logger.info("    Seed %d/%d (seed=%d)", s_idx + 1, len(seeds), seed)
+                    m = _train_window(
+                        ablation_variant, masked_data, start, end, tickers, epochs,
+                        train_dates, val_dates, test_dates, seed=seed,
+                    )
+                    logger.info(
+                        "    seed=%d | R²=%.4f  MAE=%.4f  MSE=%.6f  Spearman=%.4f",
+                        seed,
+                        float(m.get("r_squared", float("nan"))),
+                        float(m.get("mae", float("nan"))),
+                        float(m.get("mse", m.get("loss", float("nan")))),
+                        float(m.get("spearman", float("nan"))),
+                    )
+                    seed_metrics_list.append(m)
+                metrics = _aggregate_multiseed_metrics(seed_metrics_list, logger)
+            else:
+                metrics = _train_window(
+                    ablation_variant, masked_data, start, end, tickers, epochs,
+                    train_dates, val_dates, test_dates, seed=seeds[0],
+                )
+            logger.info(
+                "  %s [%s] | w%d >> R²=%.4f  MAE=%.4f  MSE=%.4f  Spearman=%.4f  loss=%.6f",
+                ablation_variant.upper(), label, wi,
+                float(metrics.get("r_squared", float("nan"))),
+                float(metrics.get("mae", float("nan"))),
+                float(metrics.get("mse", metrics.get("loss", float("nan")))),
+                float(metrics.get("spearman", float("nan"))),
+                float(metrics.get("loss", float("nan"))),
             )
             scalar_results.append(
                 {k: float(v) for k, v in metrics.items() if not k.startswith("_")}
@@ -521,6 +619,7 @@ def _run_ablation(
                     extract_daily_errors(preds, targets, logger,
                                          label=f"ablation_{label}/w{wi}", n_pairs=n_pairs)
                 )
+            else:
                 daily_losses.append(None)
 
             # Incremental update
@@ -530,8 +629,15 @@ def _run_ablation(
                 "window_metrics": scalar_results,
                 "mean_sharpe": float(np.nanmean(sharpes)) if len(sharpes) > 0 else 0.0,
                 "std_sharpe": float(np.nanstd(sharpes, ddof=1)) if len(sharpes) > 1 else 0.0,
+                "mean_mdd": float(np.nanmean([m.get("mdd_proxy", np.nan) for m in scalar_results])) if len(scalar_results) > 0 else 0.0,
+                "mean_turnover": float(np.nanmean([m.get("turnover_proxy", np.nan) for m in scalar_results])) if len(scalar_results) > 0 else 0.0,
+                "mean_cumret": float(np.nanmean([m.get("cumret_proxy", np.nan) for m in scalar_results])) if len(scalar_results) > 0 else 0.0,
+                "mean_vol": float(np.nanmean([m.get("vol_proxy", np.nan) for m in scalar_results])) if len(scalar_results) > 0 else 0.0,
                 "mean_r_squared": float(np.nanmean([m.get("r_squared", np.nan) for m in scalar_results])) if len(scalar_results) > 0 else 0.0,
                 "mean_spearman": float(np.nanmean([m.get("spearman", np.nan) for m in scalar_results])) if len(scalar_results) > 0 else 0.0,
+                "mean_mae": float(np.nanmean([m.get("mae", np.nan) for m in scalar_results])) if len(scalar_results) > 0 else 0.0,
+                "mean_mse": float(np.nanmean([m.get("mse", m.get("loss", np.nan)) for m in scalar_results])) if len(scalar_results) > 0 else 0.0,
+                "mean_loss": float(np.nanmean([m.get("loss", np.nan) for m in scalar_results])) if len(scalar_results) > 0 else 0.0,
             }
             summary_out["ablation"]["ablation_results"] = ablation_results
             
@@ -548,8 +654,15 @@ def _run_ablation(
             "window_metrics": scalar_results,
             "mean_sharpe": float(np.nanmean(sharpes)),
             "std_sharpe": float(np.nanstd(sharpes, ddof=1)) if len(sharpes) > 1 else 0.0,
+            "mean_mdd": float(np.nanmean([m.get("mdd_proxy", np.nan) for m in scalar_results])),
+            "mean_turnover": float(np.nanmean([m.get("turnover_proxy", np.nan) for m in scalar_results])),
+            "mean_cumret": float(np.nanmean([m.get("cumret_proxy", np.nan) for m in scalar_results])),
+            "mean_vol": float(np.nanmean([m.get("vol_proxy", np.nan) for m in scalar_results])),
             "mean_r_squared": float(np.nanmean([m.get("r_squared", np.nan) for m in scalar_results])),
             "mean_spearman": float(np.nanmean([m.get("spearman", np.nan) for m in scalar_results])),
+            "mean_mae": float(np.nanmean([m.get("mae", np.nan) for m in scalar_results])),
+            "mean_mse": float(np.nanmean([m.get("mse", m.get("loss", np.nan)) for m in scalar_results])),
+            "mean_loss": float(np.nanmean([m.get("loss", np.nan) for m in scalar_results])),
         }
 
     # Rank ablation sets by mean Sharpe
@@ -568,7 +681,7 @@ def _run_ablation(
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def run_bootstrap_eval_temporal_kg_rev2(
+def run_bootstrap_eval_temporal_kg_rev3(
     variants: List[str] = ALL_VARIANTS,
     n_tickers: int = DEFAULT_N_TICKERS,
     ablation: Optional[str] = None,
@@ -584,13 +697,33 @@ def run_bootstrap_eval_temporal_kg_rev2(
     block_size: int = DEFAULT_BLOCK_SIZE,
     max_windows: Optional[int] = None,
     on_progress: Optional[callable] = None,
+    seeds: Optional[List[int]] = None,
 ) -> dict:
-    logger = setup_logging("dyfo.bootstrap_eval_tkg_rev2", log_to_file=False)
+    # Create output directory early so the log file lives alongside results
+    ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+    tag = f"abl_{ablation}_{ablation_variant}_" if ablation else ""
+    out_dir = RESULTS_DIR / f"bootstrap_eval_tkg_rev3_{tag}{ts}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    run_tag = f"bootstrap_eval_tkg_rev3_{tag}{ts}"
+    logger = setup_logging("dyfo.bootstrap_eval_tkg_rev3", log_to_file=True, run_tag=run_tag)
+    # Additional handler: write execution log to the results directory
+    _exec_log_path = out_dir / "execution.log"
+    _exec_fh = logging.FileHandler(_exec_log_path, encoding="utf-8")
+    _exec_fh.setLevel(logging.INFO)
+    _exec_fh.setFormatter(logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logger.addHandler(_exec_fh)
     logger.info("=" * 60)
-    logger.info("Bootstrap Eval Temporal KG Rev2")
+    logger.info("Bootstrap Eval Temporal KG Rev3")
     logger.info("  variants   : %s", variants)
     logger.info("  n_tickers  : %d", n_tickers)
+    if seeds is None:
+        seeds = DEFAULT_SEEDS
     logger.info("  ablation   : %s", ablation or "disabled")
+    logger.info("  seeds      : %s (%d total)", seeds, len(seeds))
     logger.info("  step_days  : %d | test_days=%d | overlap=%s",
                 step_days, test_days, "YES" if step_days < test_days else "NO")
     logger.info("=" * 60)
@@ -632,11 +765,9 @@ def run_bootstrap_eval_temporal_kg_rev2(
     # ---- Dispatch -----------------------------------------------------------
     # Global summary object passed around for incremental progress
     summary = {
-        "version": "temporal_kg_rev2_bl18",
+        "version": "temporal_kg_rev3_bl18",
         "revision_notes": (
-            "Rev 2: --variants filter; --n_tickers 30/50/100; "
-            "--ablation basic/full for CORR_only/CORR+SECT/CORR+FACT baseline testing; "
-            "inherits Rev 1 non-overlapping windows and correct LR routing."
+            "Rev 3: Added financial risk metrics MDD, Turnover, Volatility, CumRet "
         ),
         "run_config": {
             "variants": variants,
@@ -651,6 +782,7 @@ def run_bootstrap_eval_temporal_kg_rev2(
             "n_windows": len(windows),
             "windows_overlap": step_days < test_days,
             "n_bootstrap": n_bootstrap, "block_size": block_size,
+            "seeds": seeds, "n_seeds": len(seeds),
         },
         "ablation": {"ablation_results": {}, "ablation_variant": ablation_variant if ablation else None, "ablation_ranking_by_sharpe": []},
         "descriptive_summary": {},
@@ -658,7 +790,14 @@ def run_bootstrap_eval_temporal_kg_rev2(
     }
 
     if ablation:
-        ablation_sets = ABLATION_BASIC if ablation == "basic" else ABLATION_FULL
+        if ablation == "basic":
+            ablation_sets = ABLATION_BASIC
+        elif ablation == "full":
+            ablation_sets = ABLATION_FULL
+        elif ablation == "corr_fact":
+            ablation_sets = ABLATION_CORR_FACT
+        else:
+            ablation_sets = ABLATION_BASIC
         if ablation_variant not in variants:
             logger.warning(
                 "ablation_variant=%s not in --variants; adding it automatically.",
@@ -666,23 +805,7 @@ def run_bootstrap_eval_temporal_kg_rev2(
             )
             variants = [ablation_variant] + [v for v in variants if v != ablation_variant]
 
-        ablation_body = _run_ablation(
-            ablation_variant=ablation_variant,
-            ablation_sets=ablation_sets,
-            data=data,
-            tickers=tickers,
-            windows=windows,
-            start=start,
-            end=end,
-            epochs=epochs,
-            n_bootstrap=n_bootstrap,
-            block_size=block_size,
-            logger=logger,
-            summary_out=summary,
-            on_progress=on_progress,
-        )
-
-        # Still run normal comparison for selected variants
+        # First run normal comparisons so ablation can reuse the "all_edges" baseline result
         normal_body = _run_normal(
             variants=variants,
             data=data,
@@ -698,6 +821,23 @@ def run_bootstrap_eval_temporal_kg_rev2(
             logger=logger,
             summary_out=summary,
             on_progress=on_progress,
+        )
+
+        ablation_body = _run_ablation(
+            ablation_variant=ablation_variant,
+            ablation_sets=ablation_sets,
+            data=data,
+            tickers=tickers,
+            windows=windows,
+            start=start,
+            end=end,
+            epochs=epochs,
+            n_bootstrap=n_bootstrap,
+            block_size=block_size,
+            logger=logger,
+            summary_out=summary,
+            on_progress=on_progress,
+            seeds=seeds,
         )
     else:
         results_body = _run_normal(
@@ -718,16 +858,14 @@ def run_bootstrap_eval_temporal_kg_rev2(
         )
 
     # ---- Assemble summary ---------------------------------------------------
-    # Output is already consolidated in the global 'summary' object.
-    ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-    tag = f"abl_{ablation}_{ablation_variant}_" if ablation else ""
-    out_dir = RESULTS_DIR / f"bootstrap_eval_tkg_rev2_{tag}{ts}"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "bootstrap_summary_tkg_rev2.json"
+    # Output dir (out_dir) was created at the top of this function.
+    summary["log_file"] = str(out_dir / "execution.log")
+    out_path = out_dir / "bootstrap_summary_tkg_rev3.json"
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2)
 
     logger.info("Saved summary → %s", out_path)
+    logger.info("Execution log → %s", out_dir / "execution.log")
     return summary
 
 
@@ -737,7 +875,7 @@ def run_bootstrap_eval_temporal_kg_rev2(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="DyFO bootstrap eval BL-18 Temporal KG — Rev 2",
+        description="DyFO bootstrap eval BL-18 Temporal KG — Rev 3",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -761,12 +899,13 @@ def main():
     )
     parser.add_argument(
         "--ablation",
-        choices=["basic", "full"],
+        choices=["basic", "full", "corr_fact"],
         default=None,
         help=(
             "Edge-type ablation mode. "
             "'basic' = CORR_only / CORR+SECT / CORR+FACT; "
-            "'full' = basic + all_edges. Default: disabled."
+            "'full' = basic + all_edges; "
+            "'corr_fact' = CORR+FACT only. Default: disabled."
         ),
     )
     parser.add_argument(
@@ -790,9 +929,16 @@ def main():
     parser.add_argument("--n_bootstrap", type=int, default=DEFAULT_N_BOOTSTRAP)
     parser.add_argument("--block_size", type=int, default=DEFAULT_BLOCK_SIZE)
     parser.add_argument("--max_windows", type=int, default=None, help="Cap on windows (default=all).")
+    parser.add_argument(
+        "--seeds", nargs="+", type=int, default=None,
+        help=(
+            "RNG seeds for multi-seed ablation (default: [42]). "
+            "Use --seeds 42 123 456 789 2024 for 5-seed validation."
+        ),
+    )
     args = parser.parse_args()
 
-    run_bootstrap_eval_temporal_kg_rev2(
+    run_bootstrap_eval_temporal_kg_rev3(
         variants=args.variants,
         n_tickers=args.n_tickers,
         ablation=args.ablation,
@@ -807,6 +953,7 @@ def main():
         n_bootstrap=args.n_bootstrap,
         block_size=args.block_size,
         max_windows=args.max_windows,
+        seeds=args.seeds,
     )
 
 

@@ -83,6 +83,10 @@ class FinancialGraph:
             return torch.zeros(2, 0, dtype=torch.long)
         return torch.cat(parts, dim=1)
 
+    def get_edge_type_names(self) -> List[str]:
+        """Edge type names in the same order as get_full_edge_index / get_edge_type_ids."""
+        return list(self.edge_types)
+
     def get_edge_type_ids(self) -> torch.Tensor:
         """Integer ID per edge, matching the order of get_full_edge_index()."""
         ids = []

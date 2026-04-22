@@ -245,13 +245,14 @@ class TGATEncoder(BaseGraphEncoder):
             dropout=self._dropout_p,
         )
 
-        # 1-layer GAT for structural readout
+        # 1-layer GAT for structural readout (relation-aware via edge_dim)
         self.gat = GATConv(
             in_channels=self._d_model + self._node_feat_dim,
             out_channels=self._d_model // self._n_heads,
             heads=self._n_heads,
             dropout=self._dropout_p,
             concat=True,
+            edge_dim=self._et_dim,   # edge-type-aware attention (fixes homogeneous dilution)
         )  # output: (N, d_model)
 
         # Final projection MLP
@@ -369,11 +370,13 @@ class TGATEncoder(BaseGraphEncoder):
             h_i = self.temporal_attn(query, ctx, ctx)  # (d_model,)
             h_temporal[i] = h_i
 
-        # --- Step 2: GAT structural readout ---
+        # --- Step 2: GAT structural readout (relation-aware) ---
         # Input to GAT: concat temporal context + raw node features
         gat_in = torch.cat([h_temporal, node_features], dim=-1)  # (N, d_model + node_feat_dim)
         edge_index_dev = edge_index.to(device)
-        gat_out = self.gat(gat_in, edge_index_dev)  # (N, d_model)
+        # Embed edge types so GATConv differentiates CORR/SECT/FACT neighbours
+        edge_type_emb_gat = self.edge_type_emb(edge_type_ids.to(device))  # (E, et_dim)
+        gat_out = self.gat(gat_in, edge_index_dev, edge_attr=edge_type_emb_gat)  # (N, d_model)
         gat_out = F.elu(gat_out)
 
         # --- Step 3: Final projection ---

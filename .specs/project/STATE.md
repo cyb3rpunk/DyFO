@@ -1,9 +1,37 @@
-﻿# TODO - DyFO (fase BL-17 / BL-18)
+# STATE - Decisions & Blockers
 
 Status atual: **H4 CONFIRMADA** (p=0.0018, Block Bootstrap). Baseline `tgn` v0.9 congelado.
-Proxima prioridade: **BL-17 Relation-Aware Heterogeneous TGN**.
+**TGAT v2** (BL-27: edge_dim fix) implementado — GATConv agora relation-aware.
+Proxima prioridade: **BL-30 Re-ablação TGAT v2** (validar `all_edges ≥ CORR+FACT`).
 
 ---
+
+## BL-27 - TGAT Edge-Dim Fix (Relation-Aware GATConv)
+
+**Decisão (2026-04-21):** O diagnóstico do teste de ablação revelou que o GATConv do TGAT
+tratava CORR, SECT e FACT como vizinhos homogêneos (sem `edge_attr`). Isso causava diluição
+de atenção quando SECT era adicionado sobre CORR+FACT => R² caía 0.0042.
+
+**Correção:** Adicionado `edge_dim=self._et_dim` no `GATConv.__init__` e passagem de
+`edge_type_emb` como `edge_attr` no forward. 3 linhas de mudança em `tgat_encoder.py`.
+
+**Impacto:** Checkpoints anteriores (sem edge_dim) **não são compatíveis** com o TGAT v2.
+Todos os experimentos precisam ser re-rodados.
+
+**Spec:** `.specs/quick/027-tgat-edge-dim-fix/TASK.md`
+
+## BL-28 - Multi-Seed Ablation
+
+**Decisão (2026-04-21):** Seed=42 fixa no treinamento impedia validação estatística dos
+deltas de R² entre variantes de ablação. Agora suportado via `--seeds 42 123 456 789 2024`.
+
+## BL-29 - Hyperparams Separados para temporal_kg/ra_htgn
+
+**Decisão (2026-04-21):** `temporal_kg` e `ra_htgn` convergem em 20-30 épocas (vs 5-8 do TGAT).
+Patience=5 cortava o treinamento antes do ponto ótimo. Agora: `TKG_PATIENCE=15`, `TKG_USE_COSINE=True`.
+
+---
+
 
 ## BL-17 - Relation-Aware Heterogeneous TGN
 
