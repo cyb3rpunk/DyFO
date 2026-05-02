@@ -1,7 +1,8 @@
 # 04 — Temporal Encoder Spec (TGAT)
 
 > Fonte de verdade para a arquitetura de produção do DyFO:
-> 1. **TGAT** (Temporal Graph Attention Network) - Stateless
+> 1. **TGAT v2** (Relation-Aware) - Stateless [Atual]
+>    - Baseado em `tgat_v2_relation_aware_spec.md`
 > 2. **TGN** (Recurrent Memory) - Baseline legado (estabilidade < TGAT)
 
 ---
@@ -23,9 +24,8 @@ Consolidar o **TGAT** como o encoder primário para o sistema de trading. A tran
 - **50 ações** (S&P 500) definido como o tradeoff ideal entre complexidade e poder preditivo.
 - Suporte experimental para 30 e 100 ativos.
 
-### Arquitetura TGAT
-
-O encoder baseia-se em Atenção Temporal em vez de memória recorrente:
+O encoder baseia-se em Atenção Temporal em vez de memória recorrente.  
+> **Versão Atual:** v2.0 (Relation-Aware — veja [tgat_v2_relation_aware_spec.md](tgat_v2_relation_aware_spec.md))
 
 ```text
 Eventos financeiros
@@ -34,7 +34,7 @@ Message Function (φ)
     ↓
 Temporal Multi-Head Attention (Stateless)
     ↓
-Graph Attention Network (GAT)
+Relation-Aware GAT (Structural Readout)
     ↓
 Global Readout
 ```
@@ -52,9 +52,10 @@ Global Readout
 - Calcula scores de atenção baseados em proximidade temporal e relevância do evento.
 - **Dimensão:** 100-dim embeddings.
 
-### 3. Graph GAT Layer
+### 3. Graph GAT Layer (Relation-Aware)
 - Propaga informações entre ativos correlacionados no grafo heterogêneo.
-- Pesa arestas `CORR`, `SECT`, `FACT` diferentemente conforme a tarefa.
+- **Diferenciação:** Utiliza `edge_attr` para ponderar `CORR`, `SECT`, `FACT` semanticamente.
+- **Mecanismo:** GATConv v2 com `edge_dim=16`.
 
 ---
 
@@ -62,7 +63,7 @@ Global Readout
 
 | Variante | Status | Papel no Projeto |
 |----------|--------|------------------|
-| `tgat` | ✅ Ativo | **Tier 1** - Modelo de produção |
+| `tgat` | ✅ Ativo | **Tier 1** - Modelo v2.0 (Relation-Aware) |
 | `tgn` | ⚠️ Estável | Baseline (com memória GRU) |
 | `temporal_kg` | ✅ Estável | Braço interpretável para ablação |
 | `ra_htgn` | 🟡 Pendente | Pesquisa futura em fusão semântica |

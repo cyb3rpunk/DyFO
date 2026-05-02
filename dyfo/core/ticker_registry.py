@@ -97,7 +97,7 @@ TICKERS_100: List[str] = TICKERS_50 + [
     # Consumer Staples (+3)
     "MO", "PM", "CL",
     # Energy (+4)
-    "EOG", "PXD", "MPC", "VLO",
+    "EOG", "COP", "MPC", "VLO",
     # Industrials (+4)
     "GE", "MMM", "DE", "FDX",
     # Communication Services (+3)

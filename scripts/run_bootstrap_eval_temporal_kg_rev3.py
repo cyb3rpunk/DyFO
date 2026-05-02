@@ -80,7 +80,7 @@ from scripts.train_link_prediction import train_link_prediction
 # Constants
 # ---------------------------------------------------------------------------
 
-ALL_VARIANTS = ["temporal_kg", "ra_htgn", "tgn", "tgat", "roland", "gat_static"]
+ALL_VARIANTS = ["temporal_kg", "ra_htgn", "tgn", "tgat", "roland", "gat_static", "persistence", "ewma"]
 N_PAIRS_BY_TICKERS = {30: 435, 50: 1225, 100: 4950}
 
 # Ablation edge-type subsets
@@ -498,9 +498,11 @@ def _run_normal(
             pairs_d = list(zip(ld, rd))
             if not pairs_d:
                 continue
-            lmae = np.concatenate([x["daily_mae"] for x, _ in pairs_d])
-            rmae = np.concatenate([y["daily_mae"] for _, y in pairs_d])
-            dm = diebold_mariano_test(lmae, rmae, loss="mae", alternative="less")
+            
+            # DM test on daily cross-sectional MAE means (fix for BRACIS reviewers' "cross-sectional dependence" concern)
+            lmae_daily = np.concatenate([x["daily_mae"] for x, _ in pairs_d])
+            rmae_daily = np.concatenate([y["daily_mae"] for _, y in pairs_d])
+            dm = diebold_mariano_test(lmae_daily, rmae_daily, loss="mae", alternative="less")
             pooled_dm[f"{left}_vs_{right}_mae"] = dm
             exploratory_p[f"dm_{left}_vs_{right}"] = dm["p_value"]
     else:

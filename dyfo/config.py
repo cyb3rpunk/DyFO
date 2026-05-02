@@ -15,6 +15,8 @@ class DyFOConfig:
         "temporal_kg",
         "tgn",
         "tgat",
+        "persistence",
+        "ewma",
     }
 
     model_variant: str = "tgn"  # Encoder variant: "tgn", "tgat", "roland", "gat_static", "ra_htgn", "temporal_kg"
@@ -27,6 +29,7 @@ class DyFOConfig:
     num_attention_heads: int = 2
     num_neighbors: int = 10
     num_gat_layers: int = 1
+    roland_ema_alpha: float = 0.05
 
     # --- Edge types ---
     edge_types: List[str] = field(

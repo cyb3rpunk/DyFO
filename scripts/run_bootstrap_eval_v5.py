@@ -434,7 +434,7 @@ def run_bootstrap_eval_v5(
         len(windows), train_days, val_days, test_days, step_days,
     )
 
-    variants = ["tgn", "roland", "gat_static"]
+    variants = ["tgn", "roland", "gat_static", "persistence", "ewma"]
     scalar_results = {variant: [] for variant in variants}
     realized_returns = {variant: [] for variant in variants}
     daily_losses = {variant: [] for variant in variants}
@@ -615,6 +615,7 @@ def run_bootstrap_eval_v5(
             if not paired_daily:
                 continue
 
+            # DM test on daily cross-sectional MAE means (fix for BRACIS reviewers' "cross-sectional dependence" concern)
             tgn_mae = np.concatenate([x["daily_mae"] for x, _ in paired_daily])
             var_mae = np.concatenate([y["daily_mae"] for _, y in paired_daily])
             tgn_mse = np.concatenate([x["daily_mse"] for x, _ in paired_daily])

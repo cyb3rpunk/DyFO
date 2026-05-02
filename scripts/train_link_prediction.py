@@ -6,6 +6,8 @@ Supports three encoder variants (--model_variant / model_variant= parameter):
   gat_static  — 2-layer GAT on a static mean-correlation graph (BL-02)
   roland      — ROLAND-like monthly snapshot GNN with EMA state (BL-02)
   temporal_kg — interpretable temporal KG ablation arm (BL-18)
+  persistence — naive random walk (tomorrow = today)
+  ewma        — exponentially weighted moving average baseline
 
 All variants share the same decoder (CorrelationRegressor / LinkPredictor)
 and the same walk-forward 60/20/20 evaluation protocol.
@@ -274,6 +276,7 @@ def train_link_prediction(
     test_dates: List[int] = None,
     val_dates: List[int] = None,
     train_dates: List[int] = None,
+    save_preds_path: str = None,
 ):
     """Full training pipeline for link prediction pre-training.
 
@@ -384,74 +387,92 @@ def train_link_prediction(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info("Using device: %s", device)
 
-    # Build encoder via factory
-    encoder: BaseGraphEncoder = build_encoder(config, num_nodes, variant=model_variant)
-    encoder = encoder.to(device)
+    is_baseline = model_variant in ["persistence", "ewma"]
+    if not is_baseline:
+        # Build encoder via factory
+        encoder: BaseGraphEncoder = build_encoder(config, num_nodes, variant=model_variant)
+        encoder = encoder.to(device)
 
-    # Variant-specific post-init setup
-    if model_variant == "gat_static":
-        from dyfo.core.gat_static_baseline import GATStaticEncoder
-        assert isinstance(encoder, GATStaticEncoder)
-        logger.info("Building static graph from training correlations...")
-        encoder.set_static_graph_from_correlations(
-            data["corr_labels_by_date"], train_dates
-        )
-        num_static_edges = encoder.static_edge_index.shape[1] // 2
-        logger.info("  Static graph: %d undirected edges", num_static_edges)
+        # Variant-specific post-init setup
+        if model_variant == "gat_static":
+            from dyfo.core.gat_static_baseline import GATStaticEncoder
+            assert isinstance(encoder, GATStaticEncoder)
+            logger.info("Building static graph from training correlations...")
+            encoder.set_static_graph_from_correlations(
+                data["corr_labels_by_date"], train_dates
+            )
+            num_static_edges = encoder.static_edge_index.shape[1] // 2
+            logger.info("  Static graph: %d undirected edges", num_static_edges)
 
-    elif model_variant == "roland":
-        from dyfo.core.roland_baseline import ROLANDLikeEncoder
-        assert isinstance(encoder, ROLANDLikeEncoder)
-        logger.info("Precomputing monthly snapshots (ROLAND-like)...")
-        encoder.precompute_monthly_snapshots(data["corr_labels_by_date"])
-        logger.info("  %d monthly snapshots available", len(encoder._monthly_snapshots))
+        elif model_variant == "roland":
+            from dyfo.core.roland_baseline import ROLANDLikeEncoder
+            assert isinstance(encoder, ROLANDLikeEncoder)
+            logger.info("Precomputing monthly snapshots (ROLAND-like)...")
+            encoder.precompute_monthly_snapshots(data["corr_labels_by_date"])
+            logger.info("  %d monthly snapshots available", len(encoder._monthly_snapshots))
 
-    # Decoder: regression (predict rho) or classification (predict edge)
-    is_regression = mode == "regression"
-    if is_regression:
-        decoder = CorrelationRegressor(
-            embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout
-        ).to(device)
-        loss_fn = nn.SmoothL1Loss()
-        logger.info("Mode: REGRESSION (predict continuous rho, Huber loss)")
+        # Decoder: regression (predict rho) or classification (predict edge)
+        is_regression = mode == "regression"
+        if is_regression:
+            decoder = CorrelationRegressor(
+                embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout
+            ).to(device)
+            loss_fn = nn.SmoothL1Loss()
+            logger.info("Mode: REGRESSION (predict continuous rho, Huber loss)")
+        else:
+            decoder = LinkPredictor(
+                embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout
+            ).to(device)
+            logger.info("Mode: CLASSIFICATION (predict binary edge, BCE loss)")
+
+        # Optimise encoder + decoder jointly
+        all_params = list(encoder.parameters()) + list(decoder.parameters())
+        optimizer = optim.Adam(all_params, lr=lr, weight_decay=weight_decay)
+
+        # LR schedule: cosine annealing with warmup (recommended for long runs)
+        # or plain linear warmup that plateaus (legacy default).
+        warmup_epochs = min(2, num_epochs)
+        if use_cosine_schedule and num_epochs > 4:
+            def _cosine_lr(ep: int, _w: int = warmup_epochs, _n: int = num_epochs) -> float:
+                if ep < _w:
+                    return (ep + 1) / max(1, _w)
+                progress = (ep - _w) / max(1, _n - _w)
+                return 0.1 + 0.9 * 0.5 * (1.0 + math.cos(math.pi * progress))
+            scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=_cosine_lr)
+            logger.info("LR schedule: cosine annealing with %d-epoch warmup", warmup_epochs)
+        else:
+            scheduler = optim.lr_scheduler.LambdaLR(
+                optimizer,
+                lr_lambda=lambda ep: min(1.0, (ep + 1) / warmup_epochs),
+            )
+            logger.info("LR schedule: linear warmup (%d epochs), then flat", warmup_epochs)
     else:
-        decoder = LinkPredictor(
-            embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout
-        ).to(device)
-        logger.info("Mode: CLASSIFICATION (predict binary edge, BCE loss)")
-
-    # Optimise encoder + decoder jointly
-    all_params = list(encoder.parameters()) + list(decoder.parameters())
-    optimizer = optim.Adam(all_params, lr=lr, weight_decay=weight_decay)
-
-    # LR schedule: cosine annealing with warmup (recommended for long runs)
-    # or plain linear warmup that plateaus (legacy default).
-    warmup_epochs = min(2, num_epochs)
-    if use_cosine_schedule and num_epochs > 4:
-        def _cosine_lr(ep: int, _w: int = warmup_epochs, _n: int = num_epochs) -> float:
-            if ep < _w:
-                return (ep + 1) / max(1, _w)
-            progress = (ep - _w) / max(1, _n - _w)
-            return 0.1 + 0.9 * 0.5 * (1.0 + math.cos(math.pi * progress))
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=_cosine_lr)
-        logger.info("LR schedule: cosine annealing with %d-epoch warmup", warmup_epochs)
-    else:
-        scheduler = optim.lr_scheduler.LambdaLR(
-            optimizer,
-            lr_lambda=lambda ep: min(1.0, (ep + 1) / warmup_epochs),
-        )
-        logger.info("LR schedule: linear warmup (%d epochs), then flat", warmup_epochs)
+        logger.info("Mode: BASELINE (purely statistical, no training)")
+        encoder = None
+        decoder = None
+        all_params = []
+        optimizer = None
+        scheduler = None
+        num_epochs = 1
+        is_regression = mode == "regression"
+        if is_regression:
+            loss_fn = nn.SmoothL1Loss()
+        else:
+            loss_fn = None
 
     # Static graph info (used by TGN; ignored by GAT-Static and ROLAND)
     edge_index = data["graph"].get_full_edge_index().to(device)
     edge_type_ids = data["graph"].get_edge_type_ids().to(device)
     edge_timestamps = torch.zeros(edge_index.shape[1], device=device)
 
-    total_params = sum(p.numel() for p in all_params)
-    trainable_params = sum(p.numel() for p in all_params if p.requires_grad)
-    logger.info("  Total parameters:     %d", total_params)
-    logger.info("  Trainable parameters: %d", trainable_params)
-    results.log_metric("total_params", total_params)
+    if not is_baseline:
+        total_params = sum(p.numel() for p in all_params)
+        trainable_params = sum(p.numel() for p in all_params if p.requires_grad)
+        logger.info("  Total parameters:     %d", total_params)
+        logger.info("  Trainable parameters: %d", trainable_params)
+        results.log_metric("total_params", total_params)
+    else:
+        logger.info("  Total parameters:     0 (Baseline)")
 
     # ------------------------------------------------------------------
     # Helper: get node features for a date
@@ -484,22 +505,24 @@ def train_link_prediction(
         res = minimize(obj, init_w, bounds=bounds, constraints=cons, method="SLSQP", tol=1e-6)
         return res.x if res.success else init_w
 
-    # ------------------------------------------------------------------
-    # Helper: run one split (train, val, or test)
-    # ------------------------------------------------------------------
+    ewma_state = {}
+    ewma_alpha = 0.05
+
     def run_split(
         dates: List[int],
         split_name: str,
         train_mode: bool = False,
         collect_predictions: bool = False,
         logit_threshold: float = 0.0,
+        pred_rows_sink: list = None,
     ) -> dict:
-        if train_mode:
-            encoder.train()
-            decoder.train()
-        else:
-            encoder.eval()
-            decoder.eval()
+        if not is_baseline:
+            if train_mode:
+                encoder.train()
+                decoder.train()
+            else:
+                encoder.eval()
+                decoder.eval()
 
         epoch_loss = 0.0
         epoch_metrics = defaultdict(float)
@@ -531,11 +554,12 @@ def train_link_prediction(
 
             if not corr_tomorrow:
                 # Still advance temporal state even when no labels available
-                with torch.no_grad():
-                    encoder.advance_day(
-                        day_events, node_feat,
-                        edge_index, edge_type_ids, edge_timestamps, current_time,
-                    )
+                if encoder is not None:
+                    with torch.no_grad():
+                        encoder.advance_day(
+                            day_events, node_feat,
+                            edge_index, edge_type_ids, edge_timestamps, current_time,
+                        )
                 continue
 
             # Build labels
@@ -551,38 +575,17 @@ def train_link_prediction(
             targets = targets.to(device)
 
             if len(src) == 0:
-                with torch.no_grad():
-                    encoder.advance_day(
-                        day_events, node_feat,
-                        edge_index, edge_type_ids, edge_timestamps, current_time,
-                    )
+                if encoder is not None:
+                    with torch.no_grad():
+                        encoder.advance_day(
+                            day_events, node_feat,
+                            edge_index, edge_type_ids, edge_timestamps, current_time,
+                        )
                 continue
 
             # Forward pass
-            if train_mode:
-                encoder.advance_day(
-                    day_events, node_feat,
-                    edge_index, edge_type_ids, edge_timestamps, current_time,
-                )
-                z = encoder.get_node_embeddings(
-                    node_feat, edge_index, edge_type_ids, edge_timestamps, current_time,
-                )
-                preds = decoder(z[src], z[dst])
-                if is_regression:
-                    loss = loss_fn(preds, targets)
-                else:
-                    loss = nn.functional.binary_cross_entropy_with_logits(
-                        preds, targets, pos_weight=torch.tensor(pos_weight, device=device),
-                    )
-
-                optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(all_params, max_norm=0.5)
-                optimizer.step()
-                # TBPTT: detach temporal state from computation graph
-                encoder.detach_state()
-            else:
-                with torch.no_grad():
+            if not is_baseline:
+                if train_mode:
                     encoder.advance_day(
                         day_events, node_feat,
                         edge_index, edge_type_ids, edge_timestamps, current_time,
@@ -591,6 +594,47 @@ def train_link_prediction(
                         node_feat, edge_index, edge_type_ids, edge_timestamps, current_time,
                     )
                     preds = decoder(z[src], z[dst])
+                    if is_regression:
+                        loss = loss_fn(preds, targets)
+                    else:
+                        loss = nn.functional.binary_cross_entropy_with_logits(
+                            preds, targets, pos_weight=torch.tensor(pos_weight, device=device),
+                        )
+
+                    optimizer.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(all_params, max_norm=0.5)
+                    optimizer.step()
+                    # TBPTT: detach temporal state from computation graph
+                    encoder.detach_state()
+                else:
+                    with torch.no_grad():
+                        encoder.advance_day(
+                            day_events, node_feat,
+                            edge_index, edge_type_ids, edge_timestamps, current_time,
+                        )
+                        z = encoder.get_node_embeddings(
+                            node_feat, edge_index, edge_type_ids, edge_timestamps, current_time,
+                        )
+                        preds = decoder(z[src], z[dst])
+            else:
+                corr_today = data["corr_labels_by_date"].get(today, {})
+                if model_variant == "ewma":
+                    for (s_idx, d_idx), val in corr_today.items():
+                        if (s_idx, d_idx) not in ewma_state:
+                            ewma_state[(s_idx, d_idx)] = val
+                        else:
+                            ewma_state[(s_idx, d_idx)] = ewma_alpha * val + (1 - ewma_alpha) * ewma_state[(s_idx, d_idx)]
+
+                baseline_preds = []
+                for s_node, d_node in zip(src.cpu().numpy(), dst.cpu().numpy()):
+                    if model_variant == "persistence":
+                        baseline_preds.append(corr_today.get((s_node, d_node), 0.0))
+                    elif model_variant == "ewma":
+                        baseline_preds.append(ewma_state.get((s_node, d_node), 0.0))
+                
+                preds = torch.tensor(baseline_preds, dtype=torch.float32, device=device)
+                loss = loss_fn(preds, targets) if is_regression else torch.tensor(0.0)
 
             if is_regression:
                 metrics = compute_regression_metrics(preds.detach(), targets)
@@ -603,6 +647,22 @@ def train_link_prediction(
             if collect_predictions:
                 all_preds.append(preds.detach())
                 all_targets.append(targets)
+
+            if pred_rows_sink is not None:
+                date_obj = _EPOCH + datetime.timedelta(days=int(tomorrow))
+                date_str = str(date_obj)
+                p_np = preds.detach().cpu().numpy()
+                t_np = targets.cpu().numpy()
+                s_np = src.cpu().numpy()
+                d_np = dst.cpu().numpy()
+                for k in range(len(s_np)):
+                    pred_rows_sink.append({
+                        "date": date_str,
+                        "src": tickers[int(s_np[k])],
+                        "dst": tickers[int(d_np[k])],
+                        "pred": float(p_np[k]),
+                        "true": float(t_np[k]),
+                    })
 
             # --- Economic Utility (Sharpe Proxy) ---
             # Only for test split or specific validation requests
@@ -724,7 +784,10 @@ def train_link_prediction(
         t0 = time.time()
 
         # Reset temporal state at start of each epoch
-        encoder.reset_state()
+        if not is_baseline:
+            encoder.reset_state()
+        else:
+            ewma_state.clear()
 
         # Train
         train_metrics = run_split(train_dates, "train", train_mode=True)
@@ -763,15 +826,16 @@ def train_link_prediction(
         if val_score > best_val_score:
             best_val_score = val_score
             best_epoch = epoch
-            torch.save({
-                "epoch": epoch,
-                "mode": mode,
-                "model_variant": model_variant,
-                "encoder_state": encoder.state_dict(),
-                "decoder_state": decoder.state_dict(),
-                "optimizer_state": optimizer.state_dict(),
-                "val_metrics": val_metrics,
-            }, results.run_dir / "best_model.pt")
+            if not is_baseline:
+                torch.save({
+                    "epoch": epoch,
+                    "mode": mode,
+                    "model_variant": model_variant,
+                    "encoder_state": encoder.state_dict(),
+                    "decoder_state": decoder.state_dict(),
+                    "optimizer_state": optimizer.state_dict(),
+                    "val_metrics": val_metrics,
+                }, results.run_dir / "best_model.pt")
             logger.info("  -> New best model saved (val %s=%.4f)", score_key, best_val_score)
             patience_counter = 0
         else:
@@ -783,8 +847,9 @@ def train_link_prediction(
                 )
                 break
 
-        scheduler.step()
-        logger.info("  LR after epoch %d: %.2e", epoch, scheduler.get_last_lr()[0])
+        if scheduler:
+            scheduler.step()
+            logger.info("  LR after epoch %d: %.2e", epoch, scheduler.get_last_lr()[0])
 
     logger.info("Best epoch: %d (val %s=%.4f)", best_epoch, score_key, best_val_score)
 
@@ -796,14 +861,19 @@ def train_link_prediction(
     logger.info("=" * 60)
 
     # Load best model
-    ckpt = torch.load(results.run_dir / "best_model.pt", weights_only=False)
-    encoder.load_state_dict(ckpt["encoder_state"])
-    decoder.load_state_dict(ckpt["decoder_state"])
+    if not is_baseline:
+        ckpt = torch.load(results.run_dir / "best_model.pt", weights_only=False)
+        encoder.load_state_dict(ckpt["encoder_state"])
+        decoder.load_state_dict(ckpt["decoder_state"])
 
-    # Reset and replay train+val to get correct temporal state at test time
-    encoder.reset_state()
-    _ = run_split(train_dates, "train_replay", train_mode=False)
-    val_replay = run_split(val_dates, "val_replay", train_mode=False, collect_predictions=True)
+        # Reset and replay train+val to get correct temporal state at test time
+        encoder.reset_state()
+        _ = run_split(train_dates, "train_replay", train_mode=False)
+        val_replay = run_split(val_dates, "val_replay", train_mode=False, collect_predictions=True)
+    else:
+        ewma_state.clear()
+        _ = run_split(train_dates, "train_replay", train_mode=False)
+        val_replay = run_split(val_dates, "val_replay", train_mode=False, collect_predictions=True)
 
     # ------------------------------------------------------------------
     # 4b. Threshold tuning (classification mode only)
@@ -824,11 +894,21 @@ def train_link_prediction(
         )
 
     # Test with inherited temporal state
+    test_pred_rows: list = [] if save_preds_path else None
     test_metrics = run_split(
         test_dates, "test", train_mode=False, logit_threshold=best_threshold,
-        collect_predictions=True
+        collect_predictions=True, pred_rows_sink=test_pred_rows,
     )
-    if model_variant == "temporal_kg" and hasattr(encoder, "export_temporal_kg_artifacts"):
+    if save_preds_path and test_pred_rows:
+        import csv as _csv
+        from pathlib import Path as _Path
+        _Path(save_preds_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(save_preds_path, "w", newline="", encoding="utf-8") as _f:
+            _writer = _csv.DictWriter(_f, fieldnames=["date", "src", "dst", "pred", "true"])
+            _writer.writeheader()
+            _writer.writerows(test_pred_rows)
+        logger.info("Per-pair predictions saved → %s  (%d rows)", save_preds_path, len(test_pred_rows))
+    if not is_baseline and model_variant == "temporal_kg" and hasattr(encoder, "export_temporal_kg_artifacts"):
         test_metrics["_temporal_kg_artifacts"] = encoder.export_temporal_kg_artifacts(top_k=10)
 
     if is_regression:
@@ -896,7 +976,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--variant",
-        choices=["tgn", "ra_htgn", "gat_static", "roland", "temporal_kg"],
+        choices=["tgn", "tgat", "ra_htgn", "gat_static", "roland", "temporal_kg", "persistence", "ewma"],
         default="tgn",
         help="Encoder variant",
     )
@@ -926,6 +1006,12 @@ if __name__ == "__main__":
         default=5,
         help="Early stopping patience (epochs without improvement)",
     )
+    parser.add_argument(
+        "--save_preds_path",
+        default=None,
+        help="If set, save per-pair test-split predictions to this CSV file "
+             "(used by event_study_covid.py).",
+    )
     args = parser.parse_args()
 
     _tickers = get_tickers(args.n_tickers)
@@ -945,4 +1031,5 @@ if __name__ == "__main__":
         mode="regression",
         model_variant=args.variant,
         seed=args.seed,
+        save_preds_path=args.save_preds_path,
     )

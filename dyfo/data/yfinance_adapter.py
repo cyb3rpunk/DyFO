@@ -15,8 +15,8 @@ import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 3
-BACKOFF_BASE = 2.0  # seconds
+MAX_RETRIES = 5
+BACKOFF_BASE = 3.0  # seconds
 
 
 def _retry(fn, description: str, max_retries: int = MAX_RETRIES):
@@ -89,28 +89,28 @@ def download_prices(
     end: str,
     interval: str = "1d",
 ) -> pd.DataFrame:
-    """Download adjusted close prices for a list of tickers.
-
-    Returns
-    -------
-    pd.DataFrame
-        Columns = tickers, index = DatetimeIndex (business-day).
-    """
-    data = _retry(
-        lambda: yf.download(
-            tickers,
-            start=start,
-            end=end,
-            interval=interval,
-            auto_adjust=True,
-            progress=False,
-        ),
-        f"download_prices({len(tickers)} tickers)",
-    )
-    if isinstance(data.columns, pd.MultiIndex):
-        prices = data["Close"]
-    else:
-        prices = data[["Close"]].rename(columns={"Close": tickers[0]})
+    """Download adjusted close prices for a list of tickers sequentially to avoid rate limits."""
+    series_dict = {}
+    for ticker in tickers:
+        try:
+            time.sleep(1.5)  # Bypass Yahoo rate limits
+            data = _retry(
+                lambda t=ticker: yf.download(
+                    t,
+                    start=start,
+                    end=end,
+                    interval=interval,
+                    auto_adjust=True,
+                    progress=False,
+                ),
+                f"download_prices({ticker})",
+            )
+            if data is not None and not data.empty and "Close" in data.columns:
+                series_dict[ticker] = data["Close"].squeeze()
+        except Exception as e:
+            logger.warning("Failed to download price for %s: %s", ticker, e)
+    
+    prices = pd.DataFrame(series_dict)
     prices = prices.dropna(how="all")
     return prices
 
@@ -120,14 +120,11 @@ def download_ohlcv(
     start: str,
     end: str,
 ) -> Dict[str, pd.DataFrame]:
-    """Download full OHLCV for each ticker individually.
-
-    Returns dict mapping ticker -> DataFrame with columns
-    [Open, High, Low, Close, Volume].
-    """
+    """Download full OHLCV for each ticker individually."""
     result: Dict[str, pd.DataFrame] = {}
     for ticker in tickers:
         try:
+            time.sleep(1.5)  # Bypass Yahoo rate limits
             tk = yf.Ticker(ticker)
             hist = _retry(
                 lambda t=tk: t.history(start=start, end=end, auto_adjust=True),
@@ -174,6 +171,7 @@ def get_earnings_dates(
     rows = []
     for ticker in tickers:
         try:
+            time.sleep(2)  # Prevent rate limits from Yahoo Finance
             ed = _fetch_earnings_for_ticker(ticker)
             if ed is None:
                 continue
