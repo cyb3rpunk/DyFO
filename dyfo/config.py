@@ -17,9 +17,13 @@ class DyFOConfig:
         "tgat",
         "persistence",
         "ewma",
+        "zero",
+        "delta_ewma",
     }
 
     model_variant: str = "tgn"  # Encoder variant: "tgn", "tgat", "roland", "gat_static", "ra_htgn", "temporal_kg"
+    use_delta_target: bool = False  # If True, target is Delta rho = rho_{t+1} - rho_t
+
 
     # --- Graph dimensions ---
     memory_dim: int = 172

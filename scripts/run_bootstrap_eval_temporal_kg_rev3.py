@@ -80,7 +80,7 @@ from scripts.train_link_prediction import train_link_prediction
 # Constants
 # ---------------------------------------------------------------------------
 
-ALL_VARIANTS = ["temporal_kg", "ra_htgn", "tgn", "tgat", "roland", "gat_static", "persistence", "ewma"]
+ALL_VARIANTS = ["temporal_kg", "ra_htgn", "tgn", "tgat", "roland", "gat_static", "persistence", "ewma", "zero", "delta_ewma"]
 N_PAIRS_BY_TICKERS = {30: 435, 50: 1225, 100: 4950}
 
 # Ablation edge-type subsets
@@ -246,8 +246,10 @@ def _train_window(
     val_dates: List[int],
     test_dates: List[int],
     seed: int = 42,
+    delta_target: bool = False,
 ) -> dict:
     lr, use_cosine, patience = _hyperparam_lr(variant)
+    config = DyFOConfig(model_variant=variant, use_delta_target=delta_target)
     return train_link_prediction(
         tickers=tickers,
         start=start,
@@ -258,6 +260,7 @@ def _train_window(
         model_variant=variant,
         seed=seed,
         prepared_data=data,
+        config=config,
         train_dates=train_dates,
         val_dates=val_dates,
         test_dates=test_dates,
@@ -362,6 +365,7 @@ def _run_normal(
     logger: logging.Logger,
     summary_out: dict,
     on_progress: Optional[callable] = None,
+    delta_target: bool = False,
 ) -> dict:
     n_pairs = N_PAIRS_BY_TICKERS.get(len(tickers), len(tickers) * (len(tickers) - 1) // 2)
     comparison_pairs = list(combinations(variants, 2))
@@ -385,7 +389,7 @@ def _run_normal(
             logger.info("Training %s | window %d", variant.upper(), wi)
             metrics = _train_window(
                 variant, data, start, end, tickers, epochs,
-                train_dates, val_dates, test_dates,
+                train_dates, val_dates, test_dates, delta_target=delta_target,
             )
             logger.info(
                 "  %s | w%d >> R²=%.4f  MAE=%.4f  MSE=%.4f  Spearman=%.4f  loss=%.6f",
@@ -524,7 +528,7 @@ def _run_normal(
             "mean_window_metrics": {
                 v: {
                     m: float(np.nanmean([e.get(m, np.nan) for e in scalar_results[v]]))
-                    for m in ["r_squared", "spearman", "mae", "mse", "loss", "cls_f1", "sharpe_proxy", "mdd_proxy", "turnover_proxy", "cumret_proxy", "vol_proxy"]
+                    for m in ["r_squared", "spearman", "mae", "mse", "loss", "cls_f1", "sharpe_proxy", "mdd_proxy", "turnover_proxy", "cumret_proxy", "vol_proxy", "r_squared_reconstructed", "mae_reconstructed"]
                 } for v in variants
             },
         },
@@ -554,6 +558,7 @@ def _run_ablation(
     summary_out: dict,
     on_progress: Optional[callable] = None,
     seeds: List[int] = DEFAULT_SEEDS,
+    delta_target: bool = False,
 ) -> dict:
     n_pairs = N_PAIRS_BY_TICKERS.get(len(tickers), len(tickers) * (len(tickers) - 1) // 2)
     ablation_results: dict = {}
@@ -584,7 +589,7 @@ def _run_ablation(
                     logger.info("    Seed %d/%d (seed=%d)", s_idx + 1, len(seeds), seed)
                     m = _train_window(
                         ablation_variant, masked_data, start, end, tickers, epochs,
-                        train_dates, val_dates, test_dates, seed=seed,
+                        train_dates, val_dates, test_dates, seed=seed, delta_target=delta_target,
                     )
                     logger.info(
                         "    seed=%d | R²=%.4f  MAE=%.4f  MSE=%.6f  Spearman=%.4f",
@@ -599,7 +604,7 @@ def _run_ablation(
             else:
                 metrics = _train_window(
                     ablation_variant, masked_data, start, end, tickers, epochs,
-                    train_dates, val_dates, test_dates, seed=seeds[0],
+                    train_dates, val_dates, test_dates, seed=seeds[0], delta_target=delta_target,
                 )
             logger.info(
                 "  %s [%s] | w%d >> R²=%.4f  MAE=%.4f  MSE=%.4f  Spearman=%.4f  loss=%.6f",
@@ -700,6 +705,7 @@ def run_bootstrap_eval_temporal_kg_rev3(
     max_windows: Optional[int] = None,
     on_progress: Optional[callable] = None,
     seeds: Optional[List[int]] = None,
+    delta_target: bool = False,
 ) -> dict:
     # Create output directory early so the log file lives alongside results
     ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
@@ -747,7 +753,7 @@ def run_bootstrap_eval_temporal_kg_rev3(
             n_tickers,
         )
 
-    config = DyFOConfig(model_variant=variants[0] if variants else "tgn")
+    config = DyFOConfig(model_variant=variants[0] if variants else "tgn", use_delta_target=delta_target)
     data_config = DataConfig(
         tickers=tickers, benchmark_ticker="SPY", start_date=start, end_date=end
     )
@@ -823,6 +829,7 @@ def run_bootstrap_eval_temporal_kg_rev3(
             logger=logger,
             summary_out=summary,
             on_progress=on_progress,
+            delta_target=delta_target,
         )
 
         ablation_body = _run_ablation(
@@ -840,6 +847,7 @@ def run_bootstrap_eval_temporal_kg_rev3(
             summary_out=summary,
             on_progress=on_progress,
             seeds=seeds,
+            delta_target=delta_target,
         )
     else:
         results_body = _run_normal(
@@ -857,6 +865,7 @@ def run_bootstrap_eval_temporal_kg_rev3(
             logger=logger,
             summary_out=summary,
             on_progress=on_progress,
+            delta_target=delta_target,
         )
 
     # ---- Assemble summary ---------------------------------------------------
@@ -866,8 +875,15 @@ def run_bootstrap_eval_temporal_kg_rev3(
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2)
 
-    logger.info("Saved summary → %s", out_path)
-    logger.info("Execution log → %s", out_dir / "execution.log")
+    logger.info("Saved summary -> %s", out_path)
+    logger.info("Execution log -> %s", out_dir / "execution.log")
+
+    if "zero" in variants and "persistence" in variants and delta_target:
+        zero_mae_rec = summary.get("descriptive_summary", {}).get("mean_window_metrics", {}).get("zero", {}).get("mae_reconstructed", np.nan)
+        persistence_mae = summary.get("descriptive_summary", {}).get("mean_window_metrics", {}).get("persistence", {}).get("mae", np.nan)
+        if not np.isnan(zero_mae_rec) and not np.isnan(persistence_mae):
+            assert abs(zero_mae_rec - persistence_mae) <= 1e-4, f"Sanity check failed: zero baseline mae_reconstructed ({zero_mae_rec:.6f}) != persistence mae ({persistence_mae:.6f})"
+
     return summary
 
 
@@ -877,9 +893,9 @@ def run_bootstrap_eval_temporal_kg_rev3(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="DyFO bootstrap eval BL-18 Temporal KG — Rev 3",
+        description="DyFO bootstrap eval BL-18 Temporal KG - Rev 3",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
+        epilog=__doc__.encode("ascii", "ignore").decode("ascii") if __doc__ else None,
     )
     parser.add_argument(
         "--variants",
@@ -926,7 +942,7 @@ def main():
         "--step_days",
         type=int,
         default=DEFAULT_STEP_DAYS,
-        help="Step between windows (default=test_days → non-overlapping).",
+        help="Step between windows (default=test_days, non-overlapping).",
     )
     parser.add_argument("--n_bootstrap", type=int, default=DEFAULT_N_BOOTSTRAP)
     parser.add_argument("--block_size", type=int, default=DEFAULT_BLOCK_SIZE)
@@ -937,6 +953,12 @@ def main():
             "RNG seeds for multi-seed ablation (default: [42]). "
             "Use --seeds 42 123 456 789 2024 for 5-seed validation."
         ),
+    )
+    parser.add_argument(
+        "--delta_target",
+        action="store_true",
+        default=False,
+        help="Use Delta rho = rho_{t+1} - rho_t as target.",
     )
     args = parser.parse_args()
 
@@ -956,6 +978,7 @@ def main():
         block_size=args.block_size,
         max_windows=args.max_windows,
         seeds=args.seeds,
+        delta_target=args.delta_target,
     )
 
 

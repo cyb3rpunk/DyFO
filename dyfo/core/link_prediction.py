@@ -217,12 +217,16 @@ def compute_metrics(
 class CorrelationRegressor(nn.Module):
     """MLP decoder for correlation regression: rho_hat = f(z_i, z_j).
 
-    Takes concatenated embeddings [z_i || z_j] and outputs a scalar in [-1, 1].
-    Uses tanh activation on the output to bound predictions.
+    Takes concatenated embeddings [z_i || z_j] and outputs a scalar.
+    Uses tanh activation on the output to bound predictions in "absolute" mode,
+    or linear output in "delta" mode.
     """
 
-    def __init__(self, embedding_dim: int, hidden_dim: int = 64, dropout: float = 0.1):
+    def __init__(self, embedding_dim: int, hidden_dim: int = 64, dropout: float = 0.1, output_mode: str = "absolute"):
         super().__init__()
+        if output_mode not in {"absolute", "delta"}:
+            raise ValueError("output_mode must be either 'absolute' or 'delta'")
+        self.output_mode = output_mode
         self.net = nn.Sequential(
             nn.Linear(embedding_dim * 2, hidden_dim),
             nn.ReLU(),
@@ -242,10 +246,13 @@ class CorrelationRegressor(nn.Module):
 
         Returns
         -------
-        Tensor of shape (B,) — predicted rho in [-1, 1] via tanh.
+        Tensor of shape (B,) — predicted rho in [-1, 1] via tanh (if absolute) or unbounded (if delta).
         """
         h = torch.cat([z_i, z_j], dim=-1)
-        return torch.tanh(self.net(h).squeeze(-1))
+        logits = self.net(h).squeeze(-1)
+        if self.output_mode == "absolute":
+            return torch.tanh(logits)
+        return logits
 
 
 def build_regression_labels(
@@ -308,10 +315,80 @@ def build_regression_labels(
     return src, dst, rho_values
 
 
+def build_delta_regression_labels(
+    corr_tomorrow: dict,
+    corr_today: dict,
+    num_nodes: int,
+    sample_ratio: float = 1.0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build delta regression labels: predict Delta rho for all pairs present today and tomorrow.
+
+    Parameters
+    ----------
+    corr_tomorrow : dict
+        Mapping (i, j) -> rho for tomorrow.
+    corr_today : dict
+        Mapping (i, j) -> rho for today.
+    num_nodes : int
+    sample_ratio : float
+        Fraction of available pairs to use.
+
+    Returns
+    -------
+    src, dst : LongTensor of shape (num_samples,)
+    delta_values : FloatTensor of shape (num_samples,)
+    """
+    seen = set()
+    src_list = []
+    dst_list = []
+    delta_list = []
+
+    for (i, j), rho_tomorrow in corr_tomorrow.items():
+        pair = (min(i, j), max(i, j))
+        if pair in seen:
+            continue
+        
+        # We need the pair to exist in both today and tomorrow.
+        # Handle both (i, j) and (j, i) keys in corr_today.
+        rho_today = None
+        if (i, j) in corr_today:
+            rho_today = corr_today[(i, j)]
+        elif (j, i) in corr_today:
+            rho_today = corr_today[(j, i)]
+            
+        if rho_today is None:
+            continue
+            
+        seen.add(pair)
+        src_list.append(pair[0])
+        dst_list.append(pair[1])
+        delta_list.append(rho_tomorrow - rho_today)
+
+    if not src_list:
+        return (
+            torch.zeros(0, dtype=torch.long),
+            torch.zeros(0, dtype=torch.long),
+            torch.zeros(0),
+        )
+
+    src = torch.tensor(src_list, dtype=torch.long)
+    dst = torch.tensor(dst_list, dtype=torch.long)
+    delta_values = torch.tensor(delta_list, dtype=torch.float)
+
+    if sample_ratio < 1.0:
+        n = max(1, int(len(src) * sample_ratio))
+        perm = torch.randperm(len(src))[:n]
+        src, dst, delta_values = src[perm], dst[perm], delta_values[perm]
+
+    # Keep deterministic ordering by default, matching build_regression_labels.
+    return src, dst, delta_values
+
+
 def compute_regression_metrics(
     predictions: torch.Tensor,
     targets: torch.Tensor,
     classification_threshold: float = 0.5,
+    rho_today: Optional[torch.Tensor] = None,
 ) -> dict:
     """Compute regression metrics for correlation prediction.
 
@@ -324,6 +401,8 @@ def compute_regression_metrics(
     targets : Tensor (B,) — actual rho
     classification_threshold : float
         |rho| threshold for derived classification metrics.
+    rho_today : Optional[Tensor]
+        If provided, used to compute reconstructed rho for delta targets.
     """
     mse = F.mse_loss(predictions, targets)
     mae = F.l1_loss(predictions, targets)
@@ -360,7 +439,7 @@ def compute_regression_metrics(
         cls_f1 = 2 * cls_precision * cls_recall / (cls_precision + cls_recall + 1e-8)
         cls_accuracy = (pred_class == target_class).float().mean()
 
-    return {
+    metrics = {
         "loss": mse.item(),
         "mse": mse.item(),
         "mae": mae.item(),
@@ -371,3 +450,17 @@ def compute_regression_metrics(
         "cls_recall": cls_recall.item(),
         "cls_f1": cls_f1.item(),
     }
+
+    if rho_today is not None:
+        rho_reconstructed = rho_today + predictions
+        rho_tomorrow = rho_today + targets  # because target is Delta rho = rho_tomorrow - rho_today
+        mae_reconstructed = F.l1_loss(rho_reconstructed, rho_tomorrow)
+        
+        ss_res_rec = ((rho_tomorrow - rho_reconstructed) ** 2).sum()
+        ss_tot_rec = ((rho_tomorrow - rho_tomorrow.mean()) ** 2).sum()
+        r_squared_reconstructed = 1.0 - ss_res_rec / (ss_tot_rec + 1e-8)
+        
+        metrics["mae_reconstructed"] = mae_reconstructed.item()
+        metrics["r_squared_reconstructed"] = r_squared_reconstructed.item()
+
+    return metrics

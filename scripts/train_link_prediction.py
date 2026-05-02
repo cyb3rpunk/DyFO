@@ -63,6 +63,7 @@ from dyfo.core.graph_builder import GraphBuilder
 from dyfo.core.link_prediction import (
     LinkPredictor, build_link_labels, compute_metrics,
     CorrelationRegressor, build_regression_labels, compute_regression_metrics,
+    build_delta_regression_labels,
 )
 from dyfo.core.model_variants import BaseGraphEncoder, build_encoder
 from dyfo.core.node_features import NodeFeatureBuilder
@@ -318,6 +319,7 @@ def train_link_prediction(
         "task": "link_prediction",
         "mode": mode,
         "model_variant": model_variant,
+        "use_delta_target": config.use_delta_target,
         "seed": seed,
         "correlation_method": config.correlation_method,
         "tickers": tickers,
@@ -387,7 +389,8 @@ def train_link_prediction(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info("Using device: %s", device)
 
-    is_baseline = model_variant in ["persistence", "ewma"]
+    delta_target = getattr(config, "use_delta_target", False)
+    is_baseline = model_variant in ["persistence", "ewma", "zero", "delta_ewma"]
     if not is_baseline:
         # Build encoder via factory
         encoder: BaseGraphEncoder = build_encoder(config, num_nodes, variant=model_variant)
@@ -414,11 +417,12 @@ def train_link_prediction(
         # Decoder: regression (predict rho) or classification (predict edge)
         is_regression = mode == "regression"
         if is_regression:
+            output_mode = "delta" if delta_target else "absolute"
             decoder = CorrelationRegressor(
-                embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout
+                embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout, output_mode=output_mode
             ).to(device)
             loss_fn = nn.SmoothL1Loss()
-            logger.info("Mode: REGRESSION (predict continuous rho, Huber loss)")
+            logger.info(f"Mode: REGRESSION (predict continuous rho, Huber loss, output_mode={output_mode})")
         else:
             decoder = LinkPredictor(
                 embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout
@@ -538,6 +542,9 @@ def train_link_prediction(
         price_vols = price_returns.rolling(window=21).std() * np.sqrt(252)
         price_vols = price_vols.fillna(0.15)  # 15% default vol if too early
 
+        def corr_lookup(corr: dict, s_node: int, d_node: int, default: float = 0.0) -> float:
+            return corr.get((s_node, d_node), corr.get((d_node, s_node), default))
+
         for d_idx in range(len(dates) - 1):
             today = dates[d_idx]
             tomorrow = dates[d_idx + 1]
@@ -564,7 +571,11 @@ def train_link_prediction(
 
             # Build labels
             if is_regression:
-                src, dst, targets = build_regression_labels(corr_tomorrow, num_nodes)
+                if delta_target:
+                    corr_today = data["corr_labels_by_date"].get(today, {})
+                    src, dst, targets = build_delta_regression_labels(corr_tomorrow, corr_today, num_nodes)
+                else:
+                    src, dst, targets = build_regression_labels(corr_tomorrow, num_nodes)
             else:
                 corr_today = data["corr_by_date"].get(today, {})
                 src, dst, targets = build_link_labels(
@@ -619,25 +630,53 @@ def train_link_prediction(
                         preds = decoder(z[src], z[dst])
             else:
                 corr_today = data["corr_labels_by_date"].get(today, {})
-                if model_variant == "ewma":
-                    for (s_idx, d_idx), val in corr_today.items():
-                        if (s_idx, d_idx) not in ewma_state:
-                            ewma_state[(s_idx, d_idx)] = val
+                if model_variant == "zero":
+                    if not delta_target:
+                        logger.warning("zero baseline is only semantically valid when use_delta_target=True")
+                elif model_variant == "ewma":
+                    for (s_idx, node_d_idx), val in corr_today.items():
+                        pair = (min(s_idx, node_d_idx), max(s_idx, node_d_idx))
+                        if pair not in ewma_state:
+                            ewma_state[pair] = val
                         else:
-                            ewma_state[(s_idx, d_idx)] = ewma_alpha * val + (1 - ewma_alpha) * ewma_state[(s_idx, d_idx)]
+                            ewma_state[pair] = ewma_alpha * val + (1 - ewma_alpha) * ewma_state[pair]
+                elif model_variant == "delta_ewma":
+                    prev_today = data["corr_labels_by_date"].get(dates[d_idx - 1], {}) if d_idx > 0 else {}
+                    for (s_idx, node_d_idx), rho_t in corr_today.items():
+                        pair = (min(s_idx, node_d_idx), max(s_idx, node_d_idx))
+                        rho_prev = corr_lookup(prev_today, s_idx, node_d_idx, default=None)
+                        if rho_prev is not None:
+                            delta_today = rho_t - rho_prev
+                            if pair not in ewma_state:
+                                ewma_state[pair] = 0.0
+                            ewma_state[pair] = ewma_alpha * delta_today + (1 - ewma_alpha) * ewma_state[pair]
 
                 baseline_preds = []
                 for s_node, d_node in zip(src.cpu().numpy(), dst.cpu().numpy()):
-                    if model_variant == "persistence":
-                        baseline_preds.append(corr_today.get((s_node, d_node), 0.0))
+                    pair = (min(s_node, d_node), max(s_node, d_node))
+                    if model_variant == "zero":
+                        baseline_preds.append(0.0)
+                    elif model_variant == "persistence":
+                        baseline_preds.append(0.0 if delta_target else corr_lookup(corr_today, s_node, d_node))
                     elif model_variant == "ewma":
-                        baseline_preds.append(ewma_state.get((s_node, d_node), 0.0))
+                        ewma_pred = ewma_state.get(pair, 0.0)
+                        if delta_target:
+                            ewma_pred = ewma_pred - corr_lookup(corr_today, s_node, d_node)
+                        baseline_preds.append(ewma_pred)
+                    elif model_variant == "delta_ewma":
+                        baseline_preds.append(ewma_state.get(pair, 0.0))
                 
                 preds = torch.tensor(baseline_preds, dtype=torch.float32, device=device)
                 loss = loss_fn(preds, targets) if is_regression else torch.tensor(0.0)
 
             if is_regression:
-                metrics = compute_regression_metrics(preds.detach(), targets)
+                if delta_target:
+                    corr_today_for_rec = data["corr_labels_by_date"].get(today, {})
+                    rho_today_list = [corr_lookup(corr_today_for_rec, s, d) for s, d in zip(src.cpu().numpy(), dst.cpu().numpy())]
+                    rho_today_tensor = torch.tensor(rho_today_list, dtype=torch.float32, device=device)
+                    metrics = compute_regression_metrics(preds.detach(), targets, rho_today=rho_today_tensor)
+                else:
+                    metrics = compute_regression_metrics(preds.detach(), targets)
             else:
                 metrics = compute_metrics(preds.detach(), targets, threshold=logit_threshold)
             epoch_loss += metrics["loss"]
@@ -668,28 +707,25 @@ def train_link_prediction(
             # Only for test split or specific validation requests
             if split_name == "test" and is_regression:
                 with torch.no_grad():
-                    # Preds: shape (num_pairs,) in [-1, 1]
+                    # Preds are deltas in delta mode; reconstruct rho before portfolio utility.
+                    rho_preds = preds
+                    if delta_target:
+                        corr_today_for_rec = data["corr_labels_by_date"].get(today, {})
+                        rho_today_list = [
+                            corr_lookup(corr_today_for_rec, s, d)
+                            for s, d in zip(src.cpu().numpy(), dst.cpu().numpy())
+                        ]
+                        rho_today_tensor = torch.tensor(rho_today_list, dtype=torch.float32, device=device)
+                        rho_preds = rho_today_tensor + preds
+
                     # We need to build the full correlation matrix
                     corr_matrix = np.eye(num_nodes)
-                    idx = 0
-                    pairs_processed = set()
-                    
-                    # reconstruct indices from BuildRegressionLabels logic (sorted pairs)
-                    # For simplicity, we assume preds correspond to the pairs in tomorrow's dict
-                    p_np = preds.detach().cpu().numpy()
-                    
-                    # We need the original pair mapping
-                    # Since we don't have it explicitly, we recreate the build logic here
-                    seen = set()
-                    pair_list = []
-                    for (i, j) in corr_tomorrow.keys():
-                        pair = (min(i, j), max(i, j))
-                        if pair not in seen:
-                            seen.add(pair)
-                            pair_list.append(pair)
-                    
-                    if len(p_np) == len(pair_list):
-                        for p_idx, (i, j) in enumerate(pair_list):
+                    p_np = rho_preds.detach().cpu().numpy()
+                    s_np = src.cpu().numpy()
+                    d_np = dst.cpu().numpy()
+
+                    if len(p_np) == len(s_np):
+                        for p_idx, (i, j) in enumerate(zip(s_np, d_np)):
                             rho = p_np[p_idx]
                             corr_matrix[i, j] = rho
                             corr_matrix[j, i] = rho
@@ -976,9 +1012,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--variant",
-        choices=["tgn", "tgat", "ra_htgn", "gat_static", "roland", "temporal_kg", "persistence", "ewma"],
+        choices=["tgn", "tgat", "ra_htgn", "gat_static", "roland", "temporal_kg", "persistence", "ewma", "zero", "delta_ewma"],
         default="tgn",
         help="Encoder variant",
+    )
+    parser.add_argument(
+        "--delta_target",
+        action="store_true",
+        default=False,
+        help="Use Delta rho = rho_{t+1} - rho_t as regression target.",
     )
     parser.add_argument("--epochs", type=int, default=10, help="Training epochs")
     parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
@@ -1032,4 +1074,5 @@ if __name__ == "__main__":
         model_variant=args.variant,
         seed=args.seed,
         save_preds_path=args.save_preds_path,
+        config=DyFOConfig(model_variant=args.variant, use_delta_target=args.delta_target),
     )
