@@ -15,3 +15,8 @@ results/
 .vscode/
 .venv/
 .claude/
+
+# Pastas de planejamento e relatorios
+reports/
+.specs/
+TODO/
