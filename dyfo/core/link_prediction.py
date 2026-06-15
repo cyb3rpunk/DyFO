@@ -215,20 +215,37 @@ def compute_metrics(
 
 
 class CorrelationRegressor(nn.Module):
-    """MLP decoder for correlation regression: rho_hat = f(z_i, z_j).
+    """MLP decoder for correlation regression: rho_hat = f(z_i, z_j [, rho_today]).
 
     Takes concatenated embeddings [z_i || z_j] and outputs a scalar.
     Uses tanh activation on the output to bound predictions in "absolute" mode,
     or linear output in "delta" mode.
+
+    When ``use_rho_conditioning=True`` the decoder additionally receives the
+    current-day pairwise correlation ``rho_today`` as a scalar input appended
+    to the embedding pair.  This prevents *cross-sectional memorisation* — a
+    failure mode where the decoder collapses to a per-pair constant because
+    the encoder embeddings carry almost no intra-pair temporal variation.
     """
 
-    def __init__(self, embedding_dim: int, hidden_dim: int = 64, dropout: float = 0.1, output_mode: str = "absolute"):
+    def __init__(
+        self,
+        embedding_dim: int,
+        hidden_dim: int = 64,
+        dropout: float = 0.1,
+        output_mode: str = "absolute",
+        use_rho_conditioning: bool = False,
+    ):
         super().__init__()
         if output_mode not in {"absolute", "delta"}:
             raise ValueError("output_mode must be either 'absolute' or 'delta'")
         self.output_mode = output_mode
+        self.use_rho_conditioning = use_rho_conditioning
+
+        # Input dim: 2 * embedding_dim  (+1 if rho conditioning)
+        input_dim = embedding_dim * 2 + (1 if use_rho_conditioning else 0)
         self.net = nn.Sequential(
-            nn.Linear(embedding_dim * 2, hidden_dim),
+            nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim // 2),
@@ -237,18 +254,33 @@ class CorrelationRegressor(nn.Module):
             nn.Linear(hidden_dim // 2, 1),
         )
 
-    def forward(self, z_i: torch.Tensor, z_j: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        z_i: torch.Tensor,
+        z_j: torch.Tensor,
+        rho_today: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """Predict correlation value.
 
         Parameters
         ----------
         z_i, z_j : Tensor of shape (B, embedding_dim)
+        rho_today : Tensor of shape (B,), optional
+            Current-day pairwise correlation.  Required when
+            ``use_rho_conditioning=True``.
 
         Returns
         -------
         Tensor of shape (B,) — predicted rho in [-1, 1] via tanh (if absolute) or unbounded (if delta).
         """
-        h = torch.cat([z_i, z_j], dim=-1)
+        parts = [z_i, z_j]
+        if self.use_rho_conditioning:
+            if rho_today is None:
+                raise ValueError(
+                    "rho_today must be provided when use_rho_conditioning=True"
+                )
+            parts.append(rho_today.unsqueeze(-1))  # (B, 1)
+        h = torch.cat(parts, dim=-1)
         logits = self.net(h).squeeze(-1)
         if self.output_mode == "absolute":
             return torch.tanh(logits)

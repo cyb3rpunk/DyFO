@@ -278,6 +278,7 @@ def train_link_prediction(
     val_dates: List[int] = None,
     train_dates: List[int] = None,
     save_preds_path: str = None,
+    use_rho_conditioning: bool = False,
 ):
     """Full training pipeline for link prediction pre-training.
 
@@ -419,10 +420,11 @@ def train_link_prediction(
         if is_regression:
             output_mode = "delta" if delta_target else "absolute"
             decoder = CorrelationRegressor(
-                embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout, output_mode=output_mode
+                embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout,
+                output_mode=output_mode, use_rho_conditioning=use_rho_conditioning,
             ).to(device)
             loss_fn = nn.SmoothL1Loss()
-            logger.info(f"Mode: REGRESSION (predict continuous rho, Huber loss, output_mode={output_mode})")
+            logger.info(f"Mode: REGRESSION (predict continuous rho, Huber loss, output_mode={output_mode}, rho_cond={use_rho_conditioning})")
         else:
             decoder = LinkPredictor(
                 embedding_dim=config.embedding_dim, hidden_dim=decoder_hidden_dim, dropout=config.dropout
@@ -594,6 +596,16 @@ def train_link_prediction(
                         )
                 continue
 
+            # Build rho_today conditioning tensor (if needed)
+            rho_today_cond = None
+            if use_rho_conditioning and is_regression and not is_baseline:
+                corr_today_for_cond = data["corr_labels_by_date"].get(today, {})
+                rho_today_list_cond = [
+                    corr_lookup(corr_today_for_cond, s, d)
+                    for s, d in zip(src.cpu().numpy(), dst.cpu().numpy())
+                ]
+                rho_today_cond = torch.tensor(rho_today_list_cond, dtype=torch.float32, device=device)
+
             # Forward pass
             if not is_baseline:
                 if train_mode:
@@ -604,7 +616,7 @@ def train_link_prediction(
                     z = encoder.get_node_embeddings(
                         node_feat, edge_index, edge_type_ids, edge_timestamps, current_time,
                     )
-                    preds = decoder(z[src], z[dst])
+                    preds = decoder(z[src], z[dst], rho_today=rho_today_cond)
                     if is_regression:
                         loss = loss_fn(preds, targets)
                     else:
@@ -627,7 +639,7 @@ def train_link_prediction(
                         z = encoder.get_node_embeddings(
                             node_feat, edge_index, edge_type_ids, edge_timestamps, current_time,
                         )
-                        preds = decoder(z[src], z[dst])
+                        preds = decoder(z[src], z[dst], rho_today=rho_today_cond)
             else:
                 corr_today = data["corr_labels_by_date"].get(today, {})
                 if model_variant == "zero":

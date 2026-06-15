@@ -232,6 +232,7 @@ def train_tgat_for_tickers_and_save_preds(
         test_dates=test_dates,
         use_cosine_schedule=TGN_USE_COSINE,
         save_preds_path=save_preds_path,
+        use_rho_conditioning=True,
     )
     print(
         "TGAT test metrics (all pairs) "
