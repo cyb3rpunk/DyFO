@@ -180,11 +180,32 @@ def prepare_data(
             p for p in corr_pairs_all if f"{p[0]}_{p[1]}" in corr_series.columns
         ]
     else:
-        logger.info("Computing rolling Pearson correlations...")
-        corr_series, corr_pairs = compute_rolling_correlations(
-            prices, window=config.rolling_corr_window,
-            threshold=config.corr_sparsify_threshold,
-        )
+        windows = list(getattr(config, "rolling_corr_windows", []) or [])
+        if not windows:
+            windows = [config.rolling_corr_window]
+        windows = sorted({int(w) for w in windows if int(w) > 1})
+        if not windows:
+            raise ValueError("rolling_corr_windows must contain at least one window > 1")
+
+        if len(windows) == 1:
+            logger.info("Computing rolling Pearson correlations (window=%d)...", windows[0])
+        else:
+            logger.info("Computing rolling Pearson correlations (multi-window=%s)...", windows)
+
+        corr_frames: List[pd.DataFrame] = []
+        corr_pairs = []
+        for w in windows:
+            corr_w, pairs_w = compute_rolling_correlations(
+                prices,
+                window=w,
+                threshold=config.corr_sparsify_threshold,
+            )
+            # Prefix columns so each window becomes an independent correlation signal.
+            corr_w = corr_w.rename(columns=lambda c: f"w{w}__{c}")
+            corr_frames.append(corr_w)
+            corr_pairs.extend(pairs_w)
+
+        corr_series = pd.concat(corr_frames, axis=1)
 
     # Event stream
     builder = GraphBuilder(config=config, tickers=tickers)
@@ -216,8 +237,10 @@ def prepare_data(
 
     # Unsparsified correlations for regression labels (continuous ρ prediction)
     if not use_dcc:
+        label_window = getattr(config, "rolling_label_window", None) or config.rolling_corr_window
+        logger.info("Computing unsparsified label correlations (window=%d)...", label_window)
         corr_series_all, corr_pairs_all = compute_rolling_correlations(
-            prices, window=config.rolling_corr_window, threshold=0.0,
+            prices, window=label_window, threshold=0.0,
         )
     corr_labels_by_date: Dict[int, Dict[Tuple[int, int], float]] = defaultdict(dict)
     for date in corr_series_all.index:

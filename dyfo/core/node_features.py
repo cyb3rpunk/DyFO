@@ -74,7 +74,10 @@ class NodeFeatureBuilder:
         mask = mcap_col > 0
         if mask.any():
             mean_mcap = mcap_col[mask].mean()
-            std_mcap = mcap_col[mask].std().clamp(min=1e-8)
+            std_mcap = mcap_col[mask].std()
+            # std() returns NaN for a single element (Bessel correction with N-1=0)
+            if std_mcap.isnan() or std_mcap < 1e-8:
+                std_mcap = torch.tensor(1e-8)
             static[:, num_sectors] = torch.where(
                 mask, (mcap_col - mean_mcap) / std_mcap, torch.zeros_like(mcap_col)
             )

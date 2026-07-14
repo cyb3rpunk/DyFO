@@ -1,7 +1,7 @@
 """DyFO configuration dataclasses."""
 
 from dataclasses import dataclass, field
-from typing import ClassVar, List
+from typing import ClassVar, List, Optional
 
 
 @dataclass
@@ -63,6 +63,8 @@ class DyFOConfig:
     correlation_method: str = "dcc_garch"  # "rolling_pearson" or "dcc_garch"
     dcc_garch_window: int = 252
     rolling_corr_window: int = 63
+    rolling_corr_windows: List[int] = field(default_factory=list)
+    rolling_label_window: Optional[int] = None
 
     # --- Data ---
     node_feature_dim: int = 20  # 1+1+1+11+1+1+K(3)+1 = 20 (see manual §2.2 with K=3)
