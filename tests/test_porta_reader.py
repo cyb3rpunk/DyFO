@@ -4,6 +4,7 @@ import datetime
 from pathlib import Path
 import numpy as np
 import pytest
+import torch
 
 from dyfo.adapters.dyfo_adapter import DyFOAdapter
 from dyfo.data.porta_reader import PortaDataReader, DEFAULT_PORTA_PATH
@@ -98,3 +99,32 @@ def test_dyfo_adapter_with_porta_reader():
     np.testing.assert_allclose(cov, cov.T, atol=1e-5)
     eigvals = np.linalg.eigvalsh(cov)
     assert (eigvals > 0).all()
+
+
+def test_node_feature_builder_from_porta():
+    """Verify that NodeFeatureBuilder builds rich node features from PORTA tensors."""
+    from dyfo.core.node_features import NodeFeatureBuilder
+    from dyfo.config import DataConfig
+    
+    reader = PortaDataReader()
+    if not reader.is_available:
+        pytest.skip("PORTA daily_core features not present")
+        
+    builder = NodeFeatureBuilder(
+        tickers=["AAPL", "MSFT"],
+        ticker_to_idx={"AAPL": 0, "MSFT": 1},
+        gics_sectors=DataConfig().gics_sectors,
+        num_regimes=3,
+    )
+    
+    features = builder.build_daily_features_from_porta(
+        porta_reader=reader,
+        start_date=datetime.date(2020, 1, 6),
+        end_date=datetime.date(2020, 1, 10),
+    )
+    
+    assert len(features) > 0
+    sample_key = list(features.keys())[0]
+    tensor = features[sample_key]
+    assert tensor.shape == (2, builder.feature_dim)
+    assert not torch.isnan(tensor).any()

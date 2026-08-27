@@ -191,3 +191,59 @@ class NodeFeatureBuilder:
             self.feature_dim,
         )
         return features_by_date
+
+    def build_daily_features_from_porta(
+        self,
+        porta_reader: "PortaDataReader",
+        start_date: Optional[datetime.date] = None,
+        end_date: Optional[datetime.date] = None,
+    ) -> Dict[str, torch.Tensor]:
+        """Build node features directly from PORTA curated daily_core tensors in read-only mode.
+
+        Populates standard node features and injects causal regime probabilities pi_t.
+        """
+        if not porta_reader.is_available:
+            raise FileNotFoundError("PORTA daily_core dataset is not available.")
+
+        porta_reader._load_metadata()
+        df_dates = porta_reader._date_index
+        assert df_dates is not None
+
+        dates = df_dates["date"].values
+        if start_date is not None:
+            dates = [d for d in dates if d >= start_date]
+        if end_date is not None:
+            dates = [d for d in dates if d <= end_date]
+
+        n = len(self._tickers)
+        features_by_date: Dict[str, torch.Tensor] = {}
+
+        for d in dates:
+            feats_mat = porta_reader.get_features_at_date(d, assets=self._tickers)
+            regimes = porta_reader.get_regime_probabilities_at_date(d)
+            
+            node_feat = torch.zeros(n, self.feature_dim)
+            if feats_mat is not None:
+                # Map available features into node_feat slots
+                # col 0: log return (mapped from PORTA log_return_1d)
+                node_feat[:, 0] = torch.tensor(feats_mat[:, 14] if feats_mat.shape[1] > 14 else feats_mat[:, 0], dtype=torch.float32)
+                # col 1: vol 21d (mapped from PORTA tech_vol_21)
+                node_feat[:, 1] = torch.tensor(feats_mat[:, 31] if feats_mat.shape[1] > 31 else feats_mat[:, 1], dtype=torch.float32)
+                # col 2: beta vs SPY (mapped from PORTA cross_beta_60_wrt_SPY)
+                node_feat[:, 2] = torch.tensor(feats_mat[:, 5] if feats_mat.shape[1] > 5 else feats_mat[:, 2], dtype=torch.float32)
+
+            # Regime prob slot: col (feature_dim - num_regimes - 1) .. (feature_dim - 1)
+            reg_start = self.feature_dim - self._num_regimes - 1
+            node_feat[:, reg_start : reg_start + self._num_regimes] = torch.tensor(
+                regimes[: self._num_regimes], dtype=torch.float32
+            )
+
+            features_by_date[d.isoformat()] = node_feat
+
+        logger.info(
+            "Built PORTA-curated node features for %d dates, %d nodes, dim=%d",
+            len(features_by_date),
+            n,
+            self.feature_dim,
+        )
+        return features_by_date

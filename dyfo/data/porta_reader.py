@@ -17,7 +17,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
-import yaml
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 DEFAULT_PORTA_PATH = Path("d:/projetos/PORTA")
 
@@ -57,8 +61,23 @@ class PortaDataReader:
             raise FileNotFoundError(f"PORTA daily_core features not found at {self.features_dir}")
 
         meta_path = self.features_dir / "tensors.meta.yaml"
-        with open(meta_path, "r", encoding="utf-8") as f:
-            self._meta = yaml.safe_load(f)
+        if yaml is not None:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                self._meta = yaml.safe_load(f)
+        else:
+            # Fallback simple line parser if PyYAML is not installed in current env
+            meta_dict: Dict[str, Any] = {"assets": [], "feature_columns": []}
+            curr_section = None
+            with open(meta_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    sline = line.strip()
+                    if sline == "assets:":
+                        curr_section = "assets"
+                    elif sline == "feature_columns:":
+                        curr_section = "feature_columns"
+                    elif sline.startswith("- ") and curr_section:
+                        meta_dict[curr_section].append(sline[2:].strip())
+            self._meta = meta_dict
 
         self._assets = list(self._meta.get("assets", []))
         self._asset_to_idx = {asset: idx for idx, asset in enumerate(self._assets)}
