@@ -32,14 +32,14 @@ Or programmatically:
 
 from __future__ import annotations
 
+import bisect
+import datetime
 import math
 import os
+import random
 import time
-import datetime
 from collections import defaultdict
 from typing import Dict, List, Tuple
-
-import random
 
 import numpy as np
 import pandas as pd
@@ -485,14 +485,14 @@ def train_link_prediction(
     # ------------------------------------------------------------------
     nf_dates = sorted(data["node_features_by_date"].keys())
 
-    def get_node_features(date_key: int) -> torch.Tensor:
-        closest = nf_dates[0]
-        for d in nf_dates:
-            if d <= str(date_key):
-                closest = d
-            else:
-                break
-        return data["node_features_by_date"][closest]
+    def get_node_features(date_key) -> torch.Tensor:
+        if isinstance(date_key, (int, float, np.integer, np.floating)):
+            target_iso = str(_EPOCH + datetime.timedelta(days=int(date_key)))
+        else:
+            target_iso = str(date_key)
+        idx = bisect.bisect_right(nf_dates, target_iso) - 1
+        idx = max(0, idx)
+        return data["node_features_by_date"][nf_dates[idx]]
 
     # ------------------------------------------------------------------
     # Helper: Portfolio optimization (GMV)
@@ -743,9 +743,10 @@ def train_link_prediction(
                             corr_matrix[j, i] = rho
                         
                         # Build Covariance Matrix
-                        date_str = str(_EPOCH + datetime.timedelta(days=tomorrow))
-                        # Use today's vol to predict tomorrow's risk
-                        vols = price_vols.loc[date_str].values if date_str in price_vols.index else np.full(num_nodes, 0.15)
+                        today_date_str = str(_EPOCH + datetime.timedelta(days=today))
+                        tomorrow_date_str = str(_EPOCH + datetime.timedelta(days=tomorrow))
+                        # Use today's vol to predict tomorrow's risk (strictly causal <= t)
+                        vols = price_vols.loc[today_date_str].values if today_date_str in price_vols.index else np.full(num_nodes, 0.15)
                         cov = np.diag(vols) @ corr_matrix @ np.diag(vols)
                         
                         # Add small regularization for stability
@@ -757,7 +758,7 @@ def train_link_prediction(
                         
                         # Realized return tomorrow
                         # Convert tomorrow (float days since 2000) back to price index
-                        day_returns = price_returns.loc[date_str].values if date_str in price_returns.index else np.zeros(num_nodes)
+                        day_returns = price_returns.loc[tomorrow_date_str].values if tomorrow_date_str in price_returns.index else np.zeros(num_nodes)
                         realized_ret = np.dot(weights, day_returns)
                         realized_returns.append(realized_ret)
 

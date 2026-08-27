@@ -14,6 +14,8 @@ Usage:
 
 from __future__ import annotations
 
+import bisect
+import datetime
 import json
 import math
 import sys
@@ -24,6 +26,9 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 import torch
+from scipy.optimize import minimize
+
+_EPOCH = datetime.date(2000, 1, 1)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -188,13 +193,13 @@ def replay_test_phase(
     nf_dates = sorted(data["node_features_by_date"].keys())
 
     def get_nf(date_key):
-        closest = nf_dates[0]
-        for d in nf_dates:
-            if d <= str(date_key):
-                closest = d
-            else:
-                break
-        return data["node_features_by_date"][closest]
+        if isinstance(date_key, (int, float, np.integer, np.floating)):
+            target_iso = str(_EPOCH + datetime.timedelta(days=int(date_key)))
+        else:
+            target_iso = str(date_key)
+        idx = bisect.bisect_right(nf_dates, target_iso) - 1
+        idx = max(0, idx)
+        return data["node_features_by_date"][nf_dates[idx]]
 
     # GMV optimizer
     def optimize_gmv(cov):
@@ -272,9 +277,10 @@ def replay_test_phase(
                 corr_matrix[j, i] = rho
 
             # Build covariance
-            date_str = str(_EPOCH + datetime.timedelta(days=tomorrow))
-            vols = (price_vols.loc[date_str].values
-                    if date_str in price_vols.index
+            today_date_str = str(_EPOCH + datetime.timedelta(days=today))
+            tomorrow_date_str = str(_EPOCH + datetime.timedelta(days=tomorrow))
+            vols = (price_vols.loc[today_date_str].values
+                    if today_date_str in price_vols.index
                     else np.full(num_nodes, 0.15))
             cov = np.diag(vols) @ corr_matrix @ np.diag(vols)
             cov += np.eye(num_nodes) * 1e-4
@@ -284,8 +290,8 @@ def replay_test_phase(
             daily_weights.append(weights.copy())
 
             # Realized return
-            day_ret = (price_returns.loc[date_str].values
-                       if date_str in price_returns.index
+            day_ret = (price_returns.loc[tomorrow_date_str].values
+                       if tomorrow_date_str in price_returns.index
                        else np.zeros(num_nodes))
             realized_ret = np.dot(weights, day_ret)
             daily_returns.append(float(realized_ret))

@@ -1,5 +1,6 @@
 """DyFO configuration dataclasses."""
 
+import os
 from dataclasses import dataclass, field
 from typing import ClassVar, List
 
@@ -88,7 +89,7 @@ class DataConfig:
     end_date: str = "2025-12-31"
 
     # --- FRED series IDs ---
-    fred_api_key: str = "7a786abc97ebd22946d8763e4d9130bf"  # 32-char hex string
+    fred_api_key: str = field(default_factory=lambda: os.getenv("FRED_API_KEY", ""))
     fred_series: dict = field(
         default_factory=lambda: {
             "fed_funds_rate": "DFF",

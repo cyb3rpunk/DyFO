@@ -202,10 +202,9 @@ class TemporalKGCore(nn.Module):
         facts.sort(key=lambda fact: (fact.timestamp, fact.head, fact.relation, fact.tail))
         self.last_fact_batch = facts
         # Cap history at 2000 facts to avoid unbounded memory growth across windows.
-        if not self.training:
-            self.fact_history.extend(facts)
-            if len(self.fact_history) > 2000:
-                self.fact_history = self.fact_history[-2000:]
+        self.fact_history.extend(facts)
+        if len(self.fact_history) > 2000:
+            self.fact_history = self.fact_history[-2000:]
 
         if not facts:
             self.last_explanations = []
@@ -306,8 +305,8 @@ class TemporalKGCore(nn.Module):
         for node_idx, t in latest_time_by_node.items():
             self.last_update_time[node_idx] = t
 
-        # explanations are only useful outside training (and expensive: O(F))
-        if not self.training:
+        # explanations are only useful outside training or on demand (and expensive: O(F))
+        if not self.training or not self.last_explanations:
             self._update_explanations(facts, device=device)
 
     def compute_embeddings(self, node_features: torch.Tensor) -> torch.Tensor:

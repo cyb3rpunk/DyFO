@@ -81,6 +81,19 @@ from scripts.train_link_prediction import train_link_prediction
 # ---------------------------------------------------------------------------
 
 ALL_VARIANTS = ["temporal_kg", "ra_htgn", "tgn", "tgat", "roland", "gat_static", "persistence", "ewma", "zero", "delta_ewma"]
+TKG_VARIANTS = ["temporal_kg", "ra_htgn", "tgn", "roland", "gat_static"]
+TKG_COMPARISON_PAIRS = [
+    ("temporal_kg", "ra_htgn"),
+    ("temporal_kg", "tgn"),
+    ("temporal_kg", "roland"),
+    ("temporal_kg", "gat_static"),
+    ("ra_htgn", "tgn"),
+    ("ra_htgn", "roland"),
+    ("ra_htgn", "gat_static"),
+    ("tgn", "roland"),
+    ("tgn", "gat_static"),
+    ("roland", "gat_static"),
+]
 N_PAIRS_BY_TICKERS = {30: 435, 50: 1225, 100: 4950}
 
 # Ablation edge-type subsets
@@ -885,6 +898,9 @@ def run_bootstrap_eval_temporal_kg_rev3(
             assert abs(zero_mae_rec - persistence_mae) <= 1e-4, f"Sanity check failed: zero baseline mae_reconstructed ({zero_mae_rec:.6f}) != persistence mae ({persistence_mae:.6f})"
 
     return summary
+
+
+run_bootstrap_eval_temporal_kg = run_bootstrap_eval_temporal_kg_rev3
 
 
 # ---------------------------------------------------------------------------
