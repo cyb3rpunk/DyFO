@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DyFO: Heterogeneous Temporal Graph Attention for Financial Co-movement Forecasting</title>
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --bg-card: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent-emerald: #10b981;
+      --accent-blue: #38bdf8;
+      --accent-red: #ef4444;
+      --accent-gold: #f59e0b;
+      --border-color: #334155;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Top Bar */
+    header {
+      background-color: rgba(30, 41, 59, 0.8);
+      backdrop-filter: blur(8px);
+      padding: 12px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-color);
+      z-index: 100;
+    }
+
+    .brand {
+      font-weight: 700;
+      font-size: 1.1rem;
+      letter-spacing: 0.5px;
+      color: var(--accent-blue);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge {
+      background-color: rgba(16, 185, 129, 0.2);
+      color: var(--accent-emerald);
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    /* Slide Container */
+    .slide-viewport {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .slide {
+      position: absolute;
+      width: 92%;
+      max-width: 1280px;
+      height: 86%;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      opacity: 0;
+      transform: scale(0.96) translateX(40px);
+      pointer-events: none;
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: scale(1) translateX(0);
+      pointer-events: auto;
+    }
+
+    .slide-header {
+      margin-bottom: 20px;
+    }
+
+    .slide-category {
+      color: var(--accent-emerald);
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 6px;
+    }
+
+    .slide-title {
+      font-size: 1.85rem;
+      font-weight: 800;
+      color: #ffffff;
+      line-height: 1.25;
+    }
+
+    .slide-content {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 32px;
+      align-items: center;
+    }
+
+    .slide-content.full-width {
+      grid-template-columns: 1fr;
+    }
+
+    .text-column {
+      font-size: 1.05rem;
+      line-height: 1.65;
+      color: #cbd5e1;
+    }
+
+    .text-column ul {
+      margin-left: 20px;
+      margin-top: 12px;
+    }
+
+    .text-column li {
+      margin-bottom: 12px;
+    }
+
+    .highlight {
+      color: var(--accent-blue);
+      font-weight: 600;
+    }
+
+    .img-column {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background-color: #0f172a;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 12px;
+      overflow: hidden;
+      height: 100%;
+    }
+
+    .img-column img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 8px;
+    }
+
+    .caption {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    /* Footer Controls */
+    footer {
+      background-color: rgba(30, 41, 59, 0.8);
+      padding: 12px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    button {
+      background-color: #334155;
+      color: #ffffff;
+      border: none;
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    button:hover {
+      background-color: #475569;
+    }
+
+    .btn-primary {
+      background-color: var(--accent-emerald);
+      color: #0f172a;
+    }
+
+    .btn-primary:hover {
+      background-color: #059669;
+      color: #ffffff;
+    }
+
+    .slide-counter {
+      font-weight: 600;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    .callout {
+      background: rgba(16, 185, 129, 0.1);
+      border-left: 4px solid var(--accent-emerald);
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin-top: 16px;
+      font-size: 0.95rem;
+    }
+
+    .callout-red {
+      background: rgba(239, 68, 68, 0.1);
+      border-left: 4px solid var(--accent-red);
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin-top: 16px;
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <span>DyFO Research</span>
+      <span class="badge">BRACIS Presentation</span>
+    </div>
+    <div class="slide-counter" id="slideIndicator">Slide 1 de 6</div>
+  </header>
+
+  <div class="slide-viewport">
+
+    <!-- SLIDE 1: Title -->
+    <div class="slide active" id="slide-1">
+      <div class="slide-header">
+        <div class="slide-category">Pesquisa de Doutorado</div>
+        <h1 class="slide-title">Heterogeneous Temporal Graph Attention with Typed Edge Conditioning for Financial Co-movement Forecasting</h1>
+      </div>
+      <div class="slide-content">
+        <div class="text-column">
+          <p style="font-size: 1.2rem; color: #e2e8f0; margin-bottom: 20px;">
+            <strong>Previsão Causal de Co-movimentos e Matrizes de Covariância em Redes Financeiras Dinâmicas com TGAT Relation-Aware.</strong>
+          </p>
+          <ul>
+            <li><strong>Desafio:</strong> Matrizes de covariância em tempo contínuo com múltiplos tipos de relações assíncronas.</li>
+            <li><strong>Inovação:</strong> Modificação cirúrgica no TGAT (Relation-Aware GATConv v2) eliminando a diluição de atenção em grafos heterogêneos.</li>
+            <li><strong>Validação:</strong> 50 ativos do S&P 500 em 9 janelas <em>walk-forward</em> multianuais e agente DRL de alocação de portfólio.</li>
+          </ul>
+          <div class="callout">
+            <strong>Diferencial Chave:</strong> Agregação em tempo contínuo sem memória recorrente (evita o drift do TGN) e sem discretização em snapshots mensais (supera ROLAND).
+          </div>
+        </div>
+        <div class="img-column">
+          <img src="../figures/bracis_slides/slide_01_tgat_v2_architecture.png" alt="Arquitetura TGAT v2">
+          <div class="caption">Arquitetura Relation-Aware TGAT v2 vs TGAT Homogêneo</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 2: Problem & Failure Mode -->
+    <div class="slide" id="slide-2">
+      <div class="slide-header">
+        <div class="slide-category">Diagnóstico da Falha</div>
+        <h2 class="slide-title">Por que Modelos SOTA Homogêneos Falham em Redes Financeiras?</h2>
+      </div>
+      <div class="slide-content">
+        <div class="text-column">
+          <p>Modelos clássicos de grafos temporais (TGAT Xu et al., 2020) foram desenhados para redes sociais homogêneas.</p>
+          <ul>
+            <li><strong>Heterogeneidade no Mercado:</strong> Redes financeiras possuem arestas de naturezas completamente distintas:
+              <ul>
+                <li><code class="highlight">CORR</code>: Correlações estatísticas altamente dinâmicas.</li>
+                <li><code class="highlight">SECT</code>: Relações estáticas de setor GICS.</li>
+                <li><code class="highlight">FACT</code>: Co-exposição a fatores de risco sistemáticos (Fama-French).</li>
+              </ul>
+            </li>
+            <li><strong>Falha de Diluição de Atenção:</strong> Sem condicionamento de aresta, arestas estáticas de setor dominam numericamente e <em>diluem</em> a atenção sobre links voláteis críticos de correlação.</li>
+          </ul>
+          <div class="callout-red">
+            <strong>Evidência de Ablação:</strong> Adicionar SECT sobre CORR+FACT no TGAT homogêneo causava queda de R² de -0.0042 devido à diluição estrutural.
+          </div>
+        </div>
+        <div class="img-column">
+          <img src="../figures/bracis_slides/slide_01_tgat_v2_architecture.png" alt="Atenção Homogênea vs Condicionada">
+          <div class="caption">Modulação de Atenção Relacional por Tipo de Aresta</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 3: The Surgical Modification -->
+    <div class="slide" id="slide-3">
+      <div class="slide-header">
+        <div class="slide-category">Contribuição Metodológica</div>
+        <h2 class="slide-title">A Modificação Cirúrgica no TGAT (Relation-Aware TGAT v2)</h2>
+      </div>
+      <div class="slide-content full-width">
+        <div class="text-column">
+          <p style="font-size: 1.15rem; margin-bottom: 16px;">
+            Injetamos embeddings de tipo de aresta <span class="highlight">\(\mathbf{e}_{ij} \in \mathbb{R}^{16}\)</span> diretamente na formulação de atenção da camada <code class="highlight">GATConv(edge_dim=16)</code>:
+          </p>
+          <div style="background: #0f172a; padding: 20px; border-radius: 10px; border: 1px solid var(--border-color); text-align: center; font-size: 1.25rem; margin-bottom: 20px;">
+            $$\alpha_{ij} = \text{softmax}_j \left( \text{LeakyReLU}\left( \mathbf{a}^T [ \mathbf{W}\mathbf{h}_i \, \Vert \, \mathbf{W}\mathbf{h}_j \, \Vert \, \mathbf{W}_e \mathbf{e}_{ij} ] \right) \right)$$
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div style="background: #0f172a; padding: 18px; border-radius: 8px; border-left: 4px solid var(--accent-emerald);">
+              <h4 style="color: var(--accent-emerald); margin-bottom: 8px;">Vantagem sobre TGN (Recorrente)</h4>
+              <p style="font-size: 0.95rem;">Sem memória GRU persistente por nó. Elimina a deriva de estado de longo prazo, gradientes explosivos e custo de TBPTT sequencial.</p>
+            </div>
+            <div style="background: #0f172a; padding: 18px; border-radius: 8px; border-left: 4px solid var(--accent-blue);">
+              <h4 style="color: var(--accent-blue); margin-bottom: 8px;">Vantagem sobre ROLAND (Snapshots)</h4>
+              <p style="font-size: 0.95rem;">Processa o fluxo contínuo de eventos assíncronos (preços, balanços, decisões do FED) sobre ring buffers locais com codificação <em>Time2Vec</em>.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 4: Predictive Results -->
+    <div class="slide" id="slide-4">
+      <div class="slide-header">
+        <div class="slide-category">Validação Empírica</div>
+        <h2 class="slide-title">Resultados Preditivos Walk-Forward (50 Ativos S&P 500)</h2>
+      </div>
+      <div class="slide-content">
+        <div class="text-column">
+          <p>Avaliação em 9 janelas <em>walk-forward</em> não-sobrepostas (2018–2025):</p>
+          <ul style="margin-top: 10px;">
+            <li><strong>DyFO (TGAT v2):</strong> <span class="highlight">R² = 0.893</span> | <span class="highlight">Spearman ρ = 0.958</span> | MAE = 0.035.</li>
+            <li><strong>GAT-Static:</strong> R² = 0.565 | Spearman ρ = 0.902 (perde dinâmica temporal).</li>
+            <li><strong>ROLAND:</strong> R² = 0.390 | Spearman ρ = 0.752 (degradação por discretização).</li>
+          </ul>
+          <div class="callout">
+            <strong>Significância Estatística:</strong> Teste Diebold-Mariano (HAC Newey-West) e Wilcoxon com correção Holm-Bonferroni confirmam superioridade preditiva (\(p < 0.0001\)).
+          </div>
+        </div>
+        <div class="img-column">
+          <img src="../figures/bracis_slides/slide_02_predictive_and_portfolio_results.png" alt="Resultados Preditivos">
+          <div class="caption">Comparativo de Acurácia Preditiva e Spearman Rank</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 5: DRL Portfolio Utility -->
+    <div class="slide" id="slide-5">
+      <div class="slide-header">
+        <div class="slide-category">Utilidade Econômica</div>
+        <h2 class="slide-title">Validação em Gerenciamento de Portfólio (DRL Walk-Forward)</h2>
+      </div>
+      <div class="slide-content">
+        <div class="text-column">
+          <p>Otimização de alocação em painel multi-ativo (18 ativos, 4 classes: Ações, Bonds, Ouro, Cripto):</p>
+          <ul>
+            <li><strong>Superação do EWMA-GMVP:</strong> DyFO-DRL+ atinge <strong>100% de win-rate</strong> em retorno acumulado (\(+1.72\%\) alpha, \(p=0.0312\)) com menor turnover (0.025 vs 0.083).</li>
+            <li><strong>Alocação Não-Trivial:</strong> DyFO aprende pesos seletivos (\(\text{entropia} = 2.615 < \ln 18 = 2.890\)).</li>
+            <li><strong>Diagnóstico de Colapso do Raw-DRL:</strong> O agente sem grafo (Raw-DRL) colapsa monotonicamente para a alocação uniforme ingênua \(1/N\) (\(\text{entropia} = 2.890\)).</li>
+          </ul>
+          <div class="callout">
+            <strong>Conclusão:</strong> Os embeddings relacionais do DyFO são o fator habilitador que permite ao DRL convergir para fronteiras eficientes.
+          </div>
+        </div>
+        <div class="img-column">
+          <img src="../figures/bracis_slides/slide_02_predictive_and_portfolio_results.png" alt="Portfólio DRL">
+          <div class="caption">Retorno Acumulado e Entropia de Alocação</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 6: Stress Regime & Triad -->
+    <div class="slide" id="slide-6">
+      <div class="slide-header">
+        <div class="slide-category">Regimes de Estresse & Integração</div>
+        <h2 class="slide-title">Rastreamento no COVID-19 & Integração no Ecossistema</h2>
+      </div>
+      <div class="slide-content">
+        <div class="text-column">
+          <p><strong>Comportamento sob Choques de Volatilidade:</strong></p>
+          <ul>
+            <li>Durante o crash de março de 2020, o DyFO rastreia imediatamente a rápida decorrelação não-linear entre <strong>SPY e ^VIX</strong> sem atraso de lag.</li>
+          </ul>
+          <p style="margin-top: 14px;"><strong>Integração com PORTA e ORION:</strong></p>
+          <ul>
+            <li><code class="highlight">DyFOAdapter</code> exporta <code class="highlight">StructuralGraphSnapshot</code> causal para alimentar a ablação do PORTA (RQ6/RQ6R) e o construtor de estado multimodal do ORION.</li>
+            <li>Alimentado em modo estritamente <em>read-only</em> pelo painel curado do PORTA (104 ativos, 2005–2026).</li>
+          </ul>
+          <div class="callout">
+            <strong>Conclusão Final:</strong> DyFO fornece a base estrutural relacional de alta fidelidade para a tríade do Doutorado.
+          </div>
+        </div>
+        <div class="img-column">
+          <img src="../figures/bracis_slides/slide_03_stress_regime_spy_vix.png" alt="SPY-VIX Stress Tracking">
+          <div class="caption">Rastreamento Contínuo de Correlação SPY-VIX (COVID-19)</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>
+    <div>
+      <button onclick="toggleFullScreen()">⛶ Tela Cheia</button>
+    </div>
+    <div class="controls">
+      <button id="prevBtn" onclick="changeSlide(-1)">◀ Anterior</button>
+      <button id="nextBtn" class="btn-primary" onclick="changeSlide(1)">Próximo ▶</button>
+    </div>
+  </footer>
+
+  <script>
+    let currentSlide = 1;
+    const totalSlides = 6;
+
+    function showSlide(index) {
+      if (index < 1) index = 1;
+      if (index > totalSlides) index = totalSlides;
+      
+      document.querySelectorAll('.slide').forEach(s => s.classList.remove('active'));
+      const activeSlide = document.getElementById(`slide-${index}`);
+      if (activeSlide) {
+        activeSlide.classList.add('active');
+        currentSlide = index;
+        document.getElementById('slideIndicator').innerText = `Slide ${currentSlide} de ${totalSlides}`;
+      }
+
+      document.getElementById('prevBtn').disabled = (currentSlide === 1);
+      document.getElementById('nextBtn').innerText = (currentSlide === totalSlides) ? 'Reiniciar ↺' : 'Próximo ▶';
+    }
+
+    function changeSlide(direction) {
+      if (currentSlide === totalSlides && direction === 1) {
+        showSlide(1);
+      } else {
+        showSlide(currentSlide + direction);
+      }
+    }
+
+    function toggleFullScreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => {});
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        }
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+        changeSlide(1);
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        changeSlide(-1);
+      } else if (e.key === 'f' || e.key === 'F') {
+        toggleFullScreen();
+      }
+    });
+  </script>
+</body>
+</html>
