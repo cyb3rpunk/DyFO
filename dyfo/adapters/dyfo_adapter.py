@@ -15,6 +15,7 @@ import numpy as np
 from dyfo.config import DataConfig, DyFOConfig
 from dyfo.adapters.structural_graph_export import RelationEdge, StructuralGraphSnapshot
 from dyfo.core.ticker_registry import TICKERS_30, TICKERS_50
+from dyfo.data.porta_reader import PortaDataReader
 
 
 def _to_us_ticker(ticker: str) -> str:
@@ -35,6 +36,7 @@ class DyFOAdapter:
         config: Optional[DyFOConfig] = None,
         tickers: Optional[List[str]] = None,
         checkpoint_path: Optional[Union[str, Path]] = None,
+        porta_reader: Optional[PortaDataReader] = None,
         device: str = "cpu",
     ):
         self.config = config or DyFOConfig()
@@ -45,6 +47,7 @@ class DyFOAdapter:
         self.num_nodes = len(self.tickers)
         self.device = device
         self.checkpoint_path = Path(checkpoint_path) if checkpoint_path else None
+        self.porta_reader = porta_reader
         
         # Internal state/mock caches for offline/live evaluation
         self._cached_embeddings: Dict[datetime.date, np.ndarray] = {}
@@ -79,10 +82,19 @@ class DyFOAdapter:
 
         # Generate deterministic relation-aware structure
         # 1. Node embeddings (N, embedding_dim=100)
-        # In actual inference, this runs RAHTGNEncoder or loads checkpoint;
-        # Here we provide the deterministic causal fallback/interface representation.
-        rng = np.random.RandomState(int(as_of_date.strftime("%Y%m%d")) % (2**31 - 1))
-        node_embeddings = rng.randn(self.num_nodes, self.config.embedding_dim).astype(np.float32)
+        # If PORTA curated features are available, project them into embedding space
+        if self.porta_reader is not None and self.porta_reader.is_available:
+            porta_feats = self.porta_reader.get_features_at_date(as_of_date, assets=self.entity_ids)
+            if porta_feats is not None:
+                # Deterministic projection to embedding_dim
+                proj_mat = np.random.RandomState(42).randn(porta_feats.shape[1], self.config.embedding_dim).astype(np.float32)
+                node_embeddings = porta_feats @ proj_mat
+            else:
+                rng = np.random.RandomState(int(as_of_date.strftime("%Y%m%d")) % (2**31 - 1))
+                node_embeddings = rng.randn(self.num_nodes, self.config.embedding_dim).astype(np.float32)
+        else:
+            rng = np.random.RandomState(int(as_of_date.strftime("%Y%m%d")) % (2**31 - 1))
+            node_embeddings = rng.randn(self.num_nodes, self.config.embedding_dim).astype(np.float32)
 
         # 2. Decomposed relational edges
         # All 4 canonical edge types must be present in dictionary (REQ-G3)
@@ -93,14 +105,30 @@ class DyFOAdapter:
             "FACT": [],
         }
 
+        # Check for real returns from PORTA
+        real_corr = None
+        if self.porta_reader is not None and self.porta_reader.is_available:
+            r_hist = self.porta_reader.get_returns_history(as_of_date, lookback_days=252, assets=self.entity_ids)
+            if r_hist is not None and r_hist.shape[0] > 10 and not np.isnan(r_hist).all():
+                # Compute empirical correlation with small ridge
+                cov_emp = np.cov(r_hist, rowvar=False)
+                stds = np.sqrt(np.diag(cov_emp))
+                stds[stds == 0] = 1e-4
+                real_corr = cov_emp / np.outer(stds, stds)
+
         # Populate sample / actual relational edges
+        rng_edges = np.random.RandomState(int(as_of_date.strftime("%Y%m%d")) % (2**31 - 1))
         for i in range(self.num_nodes):
             for j in range(i + 1, self.num_nodes):
                 src_ent = self.entity_ids[i]
                 tgt_ent = self.entity_ids[j]
                 
                 # Correlation edge (CORR)
-                rho = float(rng.uniform(-0.4, 0.8))
+                if real_corr is not None and not np.isnan(real_corr[i, j]):
+                    rho = float(real_corr[i, j])
+                else:
+                    rho = float(rng_edges.uniform(-0.4, 0.8))
+                
                 if abs(rho) >= self.config.corr_sparsify_threshold:
                     edges_by_relation["CORR"].append(
                         RelationEdge(
@@ -140,12 +168,12 @@ class DyFOAdapter:
                     )
 
                 # Factor exposure distance edge (FACT)
-                if rng.rand() < 0.2:
+                if rng_edges.rand() < 0.2:
                     edges_by_relation["FACT"].append(
                         RelationEdge(
                             source_entity_id=src_ent,
                             target_entity_id=tgt_ent,
-                            weight=float(rng.uniform(0.5, 0.95)),
+                            weight=float(rng_edges.uniform(0.5, 0.95)),
                             attributes={"model": "FF5"},
                         )
                     )
@@ -155,7 +183,7 @@ class DyFOAdapter:
         # 3. Optional relation attention weights (N, 4)
         relation_attn = None
         if include_attention:
-            raw_weights = rng.uniform(0.1, 1.0, size=(self.num_nodes, 4)).astype(np.float32)
+            raw_weights = rng_edges.uniform(0.1, 1.0, size=(self.num_nodes, 4)).astype(np.float32)
             relation_attn = raw_weights / raw_weights.sum(axis=1, keepdims=True)
 
         snapshot = StructuralGraphSnapshot(
@@ -183,8 +211,15 @@ class DyFOAdapter:
                 corr_matrix[i, j] = edge.weight
                 corr_matrix[j, i] = edge.weight
 
-        # Synthetic/representative diagonal volatilities (15% annualized default)
+        # Extract volatilities from PORTA if available
         vols = np.full(self.num_nodes, 0.15, dtype=np.float32)
+        if self.porta_reader is not None and self.porta_reader.is_available:
+            r_hist = self.porta_reader.get_returns_history(as_of_date, lookback_days=63, assets=self.entity_ids)
+            if r_hist is not None and r_hist.shape[0] > 10 and not np.isnan(r_hist).all():
+                emp_vols = np.nanstd(r_hist, axis=0) * np.sqrt(252)
+                valid_mask = (emp_vols > 0.01) & ~np.isnan(emp_vols)
+                vols[valid_mask] = emp_vols[valid_mask]
+
         cov = np.diag(vols) @ corr_matrix @ np.diag(vols)
         
         # Regularization (small ridge)
