@@ -380,17 +380,72 @@
       </div>
       <div class="slide-content full-width">
         <div class="text-column">
-          <p style="font-size: 1.15rem; margin-bottom: 12px;">
-            Injetamos embeddings de tipo de aresta <span class="formula-math" style="font-size: 1.15rem;"><span class="vec">e</span><sub>ij</sub> &isin; &#8477;<sup>16</sup></span> diretamente na formulação de atenção da camada <code class="highlight">GATConv(edge_dim=16)</code>:
+          <p style="font-size: 1.15rem; margin-bottom: 14px;">
+            Injetamos embeddings de tipo de aresta <span class="highlight" style="font-size: 1.2rem;"><strong>e</strong><sub>ij</sub> &isin; &#8477;<sup>16</sup></span> diretamente na formulação de atenção da camada <code class="highlight">GATConv(edge_dim=16)</code>:
           </p>
           
-          <!-- Dual Render: LaTeX MathJax + Native Math Typography Fallback -->
+          <!-- Pristine Vector Mathematical Equation -->
           <div class="formula-box">
-            <div class="formula-math">
-              &alpha;<sub>ij</sub> = <span class="op">softmax</span><sub>j</sub> &Big( <span class="op">LeakyReLU</span> &Big( <span class="vec">a</span><sup>T</sup> &big[ <span class="vec">W</span><span class="vec">h</span><sub>i</sub> &thinsp;&Vert;&thinsp; <span class="vec">W</span><span class="vec">h</span><sub>j</sub> &thinsp;&Vert;&thinsp; <span class="accent"><span class="vec">W</span><sub>e</sub> <span class="vec">e</span><sub>ij</sub></span> &big] &Big) &Big)
-            </div>
-            <div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">
-              $$\alpha_{ij} = \text{softmax}_j \left( \text{LeakyReLU}\left( \mathbf{a}^T [ \mathbf{W}\mathbf{h}_i \, \Vert \, \mathbf{W}\mathbf{h}_j \, \Vert \, \mathbf{W}_e \mathbf{e}_{ij} ] \right) \right)$$
+            <svg viewBox="0 0 900 70" width="100%" height="70" xmlns="http://www.w3.org/2000/svg" style="overflow: visible; display: block; margin: 0 auto;">
+              <!-- Alpha_ij -->
+              <text x="25" y="44" fill="#ffffff" font-family="'Cambria Math', 'Times New Roman', Georgia, serif" font-size="34" font-style="italic">α</text>
+              <text x="45" y="52" fill="#94a3b8" font-family="'Cambria Math', 'Times New Roman', Georgia, serif" font-size="22" font-style="italic">ij</text>
+              
+              <!-- = -->
+              <text x="75" y="44" fill="#ffffff" font-family="'Cambria Math', 'Times New Roman', serif" font-size="32">=</text>
+              
+              <!-- softmax_j -->
+              <text x="105" y="44" fill="#38bdf8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28">softmax</text>
+              <text x="210" y="52" fill="#38bdf8" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="20">j</text>
+              
+              <!-- Outer ( -->
+              <text x="230" y="48" fill="#cbd5e1" font-family="'Cambria Math', 'Times New Roman', serif" font-size="44">(</text>
+              
+              <!-- LeakyReLU -->
+              <text x="250" y="44" fill="#38bdf8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28">LeakyReLU</text>
+              
+              <!-- Inner ( -->
+              <text x="398" y="46" fill="#cbd5e1" font-family="'Cambria Math', 'Times New Roman', serif" font-size="38">(</text>
+              
+              <!-- a^T -->
+              <text x="418" y="44" fill="#ffffff" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28">a</text>
+              <text x="436" y="30" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="18">T</text>
+              
+              <!-- [ -->
+              <text x="456" y="46" fill="#cbd5e1" font-family="'Cambria Math', 'Times New Roman', serif" font-size="38">[</text>
+              
+              <!-- W h_i -->
+              <text x="472" y="44" fill="#ffffff" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28">W</text>
+              <text x="502" y="44" fill="#ffffff" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28">h</text>
+              <text x="520" y="52" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="20">i</text>
+              
+              <!-- || -->
+              <text x="542" y="44" fill="#64748b" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="26">∥</text>
+              
+              <!-- W h_j -->
+              <text x="566" y="44" fill="#ffffff" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28">W</text>
+              <text x="596" y="44" fill="#ffffff" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28">h</text>
+              <text x="614" y="52" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="20">j</text>
+              
+              <!-- || -->
+              <text x="636" y="44" fill="#64748b" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="26">∥</text>
+              
+              <!-- W_e e_ij (Highlighted in Green Box) -->
+              <rect x="658" y="14" width="140" height="42" rx="8" fill="rgba(16, 185, 129, 0.2)" stroke="#10b981" stroke-width="1.5"/>
+              <text x="668" y="44" fill="#10b981" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="28">W</text>
+              <text x="696" y="50" fill="#10b981" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="18">e</text>
+              <text x="716" y="44" fill="#10b981" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="28">e</text>
+              <text x="734" y="52" fill="#10b981" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="18">ij</text>
+              
+              <!-- ] -->
+              <text x="812" y="46" fill="#cbd5e1" font-family="'Cambria Math', 'Times New Roman', serif" font-size="38">]</text>
+              
+              <!-- ) ) -->
+              <text x="828" y="46" fill="#cbd5e1" font-family="'Cambria Math', 'Times New Roman', serif" font-size="38">)</text>
+              <text x="848" y="48" fill="#cbd5e1" font-family="'Cambria Math', 'Times New Roman', serif" font-size="44">)</text>
+            </svg>
+            <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 10px;">
+              Atenção relacional condicionada com projeção linear de aresta <strong style="color: var(--accent-emerald);">W<sub>e</sub> e<sub>ij</sub></strong>.
             </div>
           </div>
 
