@@ -473,9 +473,10 @@
         <div class="text-column">
           <p>Avaliação em 9 janelas <em>walk-forward</em> não-sobrepostas (2018–2025):</p>
           <ul style="margin-top: 10px;">
-            <li><strong>DyFO (TGAT v2):</strong> <span class="highlight">R² = 0.893</span> | <span class="highlight">Spearman ρ = 0.958</span> | MAE = 0.035.</li>
-            <li><strong>GAT-Static:</strong> R² = 0.565 | Spearman ρ = 0.902 (perde dinâmica temporal).</li>
-            <li><strong>ROLAND:</strong> R² = 0.390 | Spearman ρ = 0.752 (degradação por discretização).</li>
+            <li><strong>DyFO (TGAT v2):</strong> <span class="highlight">R² = 0.893</span> | <span class="highlight">Pearson r = 0.952</span> | <span class="highlight">Spearman ρ = 0.958</span> (MAE = 0.035).</li>
+            <li><strong>DyFO (TGN):</strong> R² = 0.803 | Pearson r = 0.925 | Spearman ρ = 0.932 (deriva por memória).</li>
+            <li><strong>GAT-Static:</strong> R² = 0.565 | Pearson r = 0.891 | Spearman ρ = 0.902 (perde dinâmica temporal).</li>
+            <li><strong>ROLAND:</strong> R² = 0.390 | Pearson r = 0.724 | Spearman ρ = 0.752 (degradação por discretização).</li>
           </ul>
           <div class="callout">
             <strong>Significância Estatística:</strong> Teste Diebold-Mariano (HAC Newey-West) e Wilcoxon com correção Holm-Bonferroni confirmam superioridade preditiva (\(p < 0.0001\)).

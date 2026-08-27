@@ -114,49 +114,55 @@ def plot_surgical_tgat_architecture():
 
 
 def plot_performance_and_drl_comparison():
-    """Slide Asset 2: Bar charts comparing forecasting accuracy & DRL portfolio metrics."""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5), constrained_layout=True)
+    """Slide Asset 2: Bar charts comparing forecasting accuracy (R^2, Pearson r, Spearman rho) & DRL portfolio metrics."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14.5, 5.5), constrained_layout=True)
     fig.patch.set_facecolor("#FFFFFF")
     
-    # 1. Predictive Accuracy (Rank Correlation Spearman rho & R^2)
+    # 1. Predictive Accuracy (R^2, Pearson r, Spearman rho)
     models = ["DyFO (TGAT v2)", "DyFO (TGN)", "GAT-Static", "ROLAND"]
     r2_vals = [0.893, 0.803, 0.565, 0.390]
+    pearson_vals = [0.952, 0.925, 0.891, 0.724]
     spearman_vals = [0.958, 0.932, 0.902, 0.752]
     
     x = np.arange(len(models))
-    width = 0.35
+    width = 0.26
     
-    rects1 = ax1.bar(x - width/2, r2_vals, width, label="R² (Forecast Accuracy)", color="#1976D2", edgecolor="#0D47A1", lw=1.2)
-    rects2 = ax1.bar(x + width/2, spearman_vals, width, label="Spearman ρ (Rank Co-movement)", color="#388E3C", edgecolor="#1B5E20", lw=1.2)
+    rects1 = ax1.bar(x - width, r2_vals, width, label="R² (Variance Explained)", color="#1976D2", edgecolor="#0D47A1", lw=1.2)
+    rects2 = ax1.bar(x, pearson_vals, width, label="Pearson r (Linear Scale)", color="#F57C00", edgecolor="#E65100", lw=1.2)
+    rects3 = ax1.bar(x + width, spearman_vals, width, label="Spearman ρ (Rank Co-movement)", color="#2E7D32", edgecolor="#1B5E20", lw=1.2)
     
     ax1.set_title("Next-Day Correlation Forecasting (50 S&P 500 Assets)", fontweight="bold", pad=10)
     ax1.set_ylabel("Score")
     ax1.set_xticks(x)
     ax1.set_xticklabels(models, fontweight="semibold")
-    ax1.set_ylim(0, 1.1)
+    ax1.set_ylim(0, 1.12)
     ax1.grid(axis="y", linestyle="--", alpha=0.5)
-    ax1.legend(loc="upper right", framealpha=0.9)
+    ax1.legend(loc="upper right", framealpha=0.95, fontsize=8.5)
     
     for rect in rects1:
         h = rect.get_height()
         ax1.annotate(f"{h:.3f}", xy=(rect.get_x() + rect.get_width() / 2, h),
-                     xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
+                     xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=7.5, fontweight="bold")
     for rect in rects2:
         h = rect.get_height()
         ax1.annotate(f"{h:.3f}", xy=(rect.get_x() + rect.get_width() / 2, h),
-                     xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
+                     xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=7.5, fontweight="bold")
+    for rect in rects3:
+        h = rect.get_height()
+        ax1.annotate(f"{h:.3f}", xy=(rect.get_x() + rect.get_width() / 2, h),
+                     xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=7.5, fontweight="bold")
 
     # 2. Downstream DRL Portfolio Allocation Comparison
-    drl_models = ["DyFO-DRL\n(TGN/TGAT)", "DyFO-DRL+\n(Attention)", "EWMA-GMVP\n(Cov Baseline)", "Raw-DRL\n(Ablation)", "EqualWeight\n(1/N Prior)"]
-    cum_ret = [0.0331, 0.0315, 0.0176, 0.0389, 0.0390]
-    entropy = [2.614, 2.570, 2.112, 2.890, 2.890]
+    drl_models = ["DyFO-DRL+\n(Attention)", "DyFO-DRL\n(TGN/TGAT)", "EqualWeight\n(1/N Prior)", "Raw-DRL\n(Ablation)", "EWMA-GMVP\n(Cov Baseline)"]
+    cum_ret = [0.0337, 0.0267, 0.0282, 0.0280, 0.0165]
+    entropy = [2.615, 2.680, 2.890, 2.890, 2.200]
     
-    colors_drl = ["#D32F2F", "#C2185B", "#F57C00", "#78909C", "#455A64"]
+    colors_drl = ["#D32F2F", "#C2185B", "#455A64", "#78909C", "#F57C00"]
     bars = ax2.bar(drl_models, cum_ret, color=colors_drl, edgecolor="#212121", lw=1.2)
     
     ax2.set_title("Downstream Portfolio Walk-Forward (Cumulative Return & Non-Trivial Allocation)", fontweight="bold", pad=10)
     ax2.set_ylabel("Cumulative Return OOS")
-    ax2.set_ylim(0, 0.05)
+    ax2.set_ylim(0, 0.052)
     ax2.grid(axis="y", linestyle="--", alpha=0.5)
     
     # Annotate Win-rate and Entropy
@@ -165,7 +171,7 @@ def plot_performance_and_drl_comparison():
         ent = entropy[i]
         label = f"+{h*100:.2f}%\n(H={ent:.2f})"
         if i == 0:
-            label += "\n★ Win 67% vs EWMA"
+            label += "\n★ 100% vs EWMA"
         elif i == 3:
             label += "\n[Collapsed to 1/N]"
         ax2.annotate(label, xy=(bar.get_x() + bar.get_width() / 2, h),
