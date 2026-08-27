@@ -208,7 +208,7 @@ def plot_stress_regime_tracking():
     ax.set_ylabel("Pairwise Correlation ρ(t)")
     ax.set_ylim(-0.95, -0.1)
     ax.grid(True, linestyle="--", alpha=0.5)
-    ax.legend(loc="lower right", framealpha=0.95)
+    ax.legend(loc="upper left", framealpha=0.95, fontsize=9)
     
     ax.annotate("Non-linear decorrelation shock:\nDyFO rapidly tracks dynamic shifts\nwithout collapsing to static mean",
                 xy=(dates[45], true_rho[45]), xytext=(dates[58], -0.30),
