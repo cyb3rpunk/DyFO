@@ -1,82 +1,93 @@
-# Guia de Apresentação & Notas de Slide — BRACIS
+# Guia e Roteiro de Apresentação — DyFO (BRACIS 2026)
 
-> **Artigo:** *DyFO: Heterogeneous Temporal Graph Attention with Typed Edge Conditioning for Financial Co-movement Forecasting*  
-> **Tema Central:** Previsão Causal de Co-movimentos e Matrizes de Covariância em Redes Financeiras Dinâmicas com TGAT Relation-Aware.
+**Título Oficial:**  
+*Heterogeneous Temporal Graph Attention with Typed Edge Conditioning for Financial Co-movement Forecasting*
 
----
-
-## 🎯 Mensagens-Chave para a Banca / Audiência
-
-1. **Problema Real em Finanças Quantitativas**: Métodos tradicionais (Pearson móvel, DCC-GARCH) modelam pares de ativos isoladamente e sofrem em regimes de estresse. Modelos puramente estáticos ignoram a temporalidade de choques de mercado.
-2. **A Modificação Cirúrgica no TGAT (Relation-Aware TGAT v2)**:
-   - O TGAT original (*Xu et al., ICLR 2020*) foi formulado para grafos homogêneos onde todos os vizinhos são tratados igualmente no readout estrutural (`GATConv` padrão).
-   - **O Diagnóstico da Falha**: Em redes financeiras heterogêneas, vizinhos estáticos de setor (`SECT`) diluem a atenção de arestas altamente dinâmicas de correlação (`CORR`) e fatores de risco (`FACT`).
-   - **Nossa Modificação Cirúrgica**: Introdução de embeddings de tipo de aresta $\mathbf{e}_{ij} \in \mathbb{R}^{16}$ diretamente na formulação de atenção do GAT (`edge_dim`):
-     $$\alpha_{ij} = \text{softmax}_j \left( \text{LeakyReLU}\left( \mathbf{a}^T [ \mathbf{W}\mathbf{h}_i \, \Vert \, \mathbf{W}\mathbf{h}_j \, \Vert \, \mathbf{W}_e \mathbf{e}_{ij} ] \right) \right)$$
-   - **Vantagens estruturais**:
-     - *Sem recorrência (Non-recurrent)*: Ao contrário do TGN (GRU persistent memory que acumula deriva e instabilidade em backpropagation), o TGAT agrega eventos temporais assíncronos sobre ring buffers locais ($k=20$) com *Time2Vec* learnable encoding.
-     - *Sem discretização em snapshots*: Ao contrário do ROLAND (que divide em meses discretos), o DyFO processa o fluxo contínuo de eventos diários (preços, earnings, FED decisions, macro releases).
-3. **Validação Empírica & Comparação com Baselines**:
-   - **Acurácia Preditiva ($N=50$ ativos do S&P 500, 11 setores GICS, 9 janelas Walk-Forward)**:
-     - DyFO (TGAT v2): $R^2 = 0.893$, Spearman $\rho = 0.958$, $\text{MAE} = 0.035$, $\text{cls-F1} = 0.793$.
-     - GAT-Static: $R^2 = 0.565$, Spearman $\rho = 0.902$.
-     - ROLAND: $R^2 = 0.390$, Spearman $\rho = 0.752$.
-     - *Testes de Hipótese*: Teste Diebold-Mariano (HAC Newey-West) e Wilcoxon com correção Holm-Bonferroni confirmam superioridade preditiva estatisticamente significante ($p < 0.0001$).
-   - **Utilidade em Otimização de Portfolio (DRL Walk-Forward)**:
-     - **DyFO-DRL vs EWMA-GMVP**: O DyFO supera o baseline fechado EWMA-GMVP em retorno acumulado pareado com **67% de win rate** ($p < 0.001$, bootstrap CI95 $[+0.67, +2.68]$) e entrega maior Calmar ratio.
-     - **Evidência de Alocação Não-Trivial**: DyFO aprende distribuição seletiva e concentrada ($\text{entropy} = 2.57-2.61 < \ln 18 = 2.890$, $\text{HHI} > 1/18$), enquanto modelos DRL sem grafo (**Raw-DRL**) colapsam monotonicamente para a alocação uniforme $1/N$ ($\text{entropy} = 2.890$).
-     - **Regimes de Estresse (COVID-19)**: No crash de 2020, o DyFO rastreia prontamente a decorrelação não-linear entre SPY e ^VIX sem convergir para médias estáticas.
+**Formato:** Apresentação Oral (11 Slides)  
+**Deck Interativo:** [`doc/bracis_presentation_deck.html`](file:///d:/projetos/DyFO/doc/bracis_presentation_deck.html)
 
 ---
 
-## 📊 Roteiro Sugerido de Slides
+## 🎯 Roteiro Slide a Slide com Falas do Apresentador
 
-```mermaid
-graph LR
-    S1[Slide 1: Capa & Contexto] --> S2[Slide 2: Problema & Limitações SOTA]
-    S2 --> S3[Slide 3: Modificação Cirúrgica no TGAT]
-    S3 --> S4[Slide 4: Resultados Preditivos S&P 500]
-    S4 --> S5[Slide 5: Validação DRL & Portfólio]
-    S5 --> S6[Slide 6: Conclusão & Próximos Passos]
-```
-
-### Slide 1: Motivação & Formulação do Grafo Heterogêneo
-- **Título:** *Previsão de Co-movimento Financeiro em Tempo Contínuo com Grafos Heterogêneos*
-- **Pontos:**
-  - 50 ativos S&P 500 cobrindo os 11 setores GICS.
-  - 4 classes de arestas: `CORR` (DCC-GARCH time-varying), `SECT` (GICS setorial), `SUPL` (supply chain), `FACT` (Fama-French 5-factor exposure distance).
-  - 7 tipos de eventos assíncronos: log-returns, balanços trimestrais, choques de juros (FED), releases macroeconômicos.
-
-### Slide 2: A Modificação Cirúrgica no TGAT (O "Core" Técnico)
-- **Visual:** `figures/bracis_slides/slide_01_tgat_v2_architecture.png`
-- **Falas do Apresentador:**
-  > *"O TGAT original de Xu et al. (ICLR 2020) foi construído para grafos homogêneos. Quando aplicamos o TGAT a redes financeiras heterogêneas, identificamos uma limitação severa: diluição de atenção. Vizinhos de setor estático (SECT) diluíam o sinal de correlações dinâmicas (CORR). Nossa modificação cirúrgica adicionou condicionamento relacional direto na camada GAT via embeddings de tipo de aresta (edge_dim=16). Isso permitiu à rede modular a atenção dependendo da semântica da relação, eliminando a degradação estrutural sem incorrer no custo de memória persistente recorrente do TGN."*
-
-### Slide 3: Resultados Experimentais Preditivos (9 Janelas Walk-Forward)
-- **Visual:** Painel esquerdo de `figures/bracis_slides/slide_02_predictive_and_portfolio_results.png`
-- **Tabela Comparativa**:
-  | Modelo | $R^2$ | Spearman $\rho$ | MAE | cls-F1 | DM Test ($p$-val) |
-  |---|:---:|:---:|:---:|:---:|:---:|
-  | **DyFO (TGAT v2)** | **0.893** | **0.958** | **0.035** | **0.793** | — |
-  | **DyFO (TGN)** | 0.803 | 0.932 | 0.050 | 0.782 | $< 0.0001$ |
-  | **GAT-Static** | 0.565 | 0.902 | 0.078 | 0.509 | $< 0.0001$ |
-  | **ROLAND** | 0.390 | 0.752 | 0.086 | 0.426 | $< 0.0001$ |
-
-### Slide 4: Utilidade Prática em Gerenciamento de Portfolio (DRL Walk-Forward)
-- **Visual:** Painel direito de `figures/bracis_slides/slide_02_predictive_and_portfolio_results.png`
-- **Falas do Apresentador:**
-  > *"Para testar se os embeddings do DyFO geram valor econômico além da previsão estatística, avaliamos um agente de Deep Reinforcement Learning (DRL) em walk-forward multianual (18 ativos, 4 classes: ações, bonds, ouro, cripto). O DyFO-DRL superou o benchmark clássico EWMA-GMVP em retorno e Calmar ratio em 67% dos episódios (p < 0.001). Crucialmente, sob o mesmo orçamento de treino, o agente sem grafo (Raw-DRL) colapsa para a alocação ingênua 1/N. O embedding do DyFO é o fator habilitador que permite ao otimizador convergir para alocações eficientes e não-triviais."*
-
-### Slide 5: Rastreamento em Regimes de Crise (Stress Regime)
-- **Visual:** `figures/bracis_slides/slide_03_stress_regime_spy_vix.png`
-- **Discussão:** Rastreamento dinâmico da relação SPY - ^VIX durante o crash de março de 2020. O modelo captura a rápida mudança de correlação em tempo contínuo sem atraso de lag de snapshot.
+### Slide 1: Título e Visão Geral da Pesquisa
+- **Mensagem Chave:** O DyFO introduz uma modificação cirúrgica no TGAT para previsão causal de co-movimentos e matrizes de covariância em tempo contínuo.
+- **Fala Sugerida:**
+  > *"Bom dia a todos. Hoje apresento o DyFO, uma arquitetura de Grafos Temporais Heterogêneos desenvolvida no âmbito da nossa pesquisa de Doutorado para resolver um problema fundamental em finanças quantitativas: prever matrizes dinâmicas de correlação e covariância em tempo contínuo a partir de fluxos assíncronos de eventos de mercado."*
 
 ---
 
-## 📑 Resumo dos Arquivos de Slide Gerados
+### Slide 2: Contexto e Não-Estacionariedade em Redes Financeiras
+- **Mensagem Chave:** A necessidade de matrizes dinâmicas $\mathbf{\Sigma}_{t+1}$ precisas e o fracasso dos métodos econométricos clássicos (EWMA, DCC-GARCH) em capturar topologias ricas sob choques rápidos.
+- **Fala Sugerida:**
+  > *"O gerenciamento de risco e portfólio depende criticamente de prever a estrutura de dependência futura dos ativos. Métodos clássicos como EWMA ou DCC-GARCH assumem dinâmica linear ou sofrem de atraso temporal durante choques de cauda. Grafos temporais nos permitem tratar a covariância como um problema de Link Prediction contínuo, fundindo múltiplos canais de transmissão de risco."*
 
-| Arquivo de Imagem | Conteúdo do Slide | Formato |
-|---|---|---|
-| `figures/bracis_slides/slide_01_tgat_v2_architecture.png` | Arquitetura Homogênea vs TGAT v2 Relation-Aware | 16:9 HD (300 DPI) |
-| `figures/bracis_slides/slide_02_predictive_and_portfolio_results.png` | Acurácia Preditiva & Métricas de DRL Walk-Forward | 16:9 HD (300 DPI) |
-| `figures/bracis_slides/slide_03_stress_regime_spy_vix.png` | Rastreamento SPY-VIX em Regime de Estresse (COVID) | 16:9 HD (300 DPI) |
+---
+
+### Slide 3: Diagnóstico da Falha: O Problema da Diluição de Atenção
+- **Mensagem Chave:** Modelos SOTA homogêneos (TGAT original) falham em redes financeiras porque arestas estáticas densas (SECT) afogam a atenção sobre arestas dinâmicas críticas (CORR).
+- **Fala Sugerida:**
+  > *"Por que os modelos de grafos temporais clássicos falham no mercado financeiro? Redes financeiras são inerentemente heterogêneas: temos correlações estatísticas dinâmicas, setores industriais GICS e fatores sistemáticos de Fama-French. No TGAT original, homogêneo, as arestas estáticas de setor dominam numericamente o grafo e diluem o peso de atenção, reduzindo o R² em vez de ajudar."*
+
+---
+
+### Slide 4: Contribuição Metodológica: Relation-Aware TGAT v2
+- **Mensagem Chave:** A formulação da atenção condicionada por tipo de aresta $\mathbf{W}_e \mathbf{e}_{ij}$ em `GATConv(edge_dim=16)`.
+- **Fórmula:**
+  $$\alpha_{ij} = \text{softmax}_j \left( \text{LeakyReLU}\left( \mathbf{a}^T [ \mathbf{W}\mathbf{h}_i \, \Vert \, \mathbf{W}\mathbf{h}_j \, \Vert \, \mathbf{W}_e \mathbf{e}_{ij} ] \right) \right)$$
+- **Fala Sugerida:**
+  > *"Nossa contribuição cirúrgica foi injetar embeddings aprendíveis de tipo de aresta diretamente no mecanismo de atenção do GATConv, modulando o fluxo de mensagens por relação sem memória recorrente. Isso elimina a deriva de estado de longo prazo típica do TGN e evita a perda de sinal temporal causada pela discretização em snapshots do ROLAND."*
+
+---
+
+### Slide 5: Escalaridade de Universo: N=18 (DRL), N=50 (Paper) e N=104 (PORTA)
+- **Mensagem Chave:** **Diferenciação transparente e justificada do número de tickers em cada experimento.**
+- **Dados:**
+  - $N=18$ (Multi-Asset Class): 153 links/dia (Ações, TLT, GLD, BTC-USD) &rarr; Foco em balanceamento de alocação DRL.
+  - $N=50$ (Paper Benchmark): 1.225 links/dia em 11 setores GICS &rarr; Foco em significância estatística do link-prediction.
+  - $N=104$ (PORTA Ecosystem): 5.356 links/dia &rarr; Escala industrial de longo prazo (2005–2026).
+- **Fala Sugerida:**
+  > *"É crucial destacar a distinção de escala entre os nossos experimentos: no benchmark preditivo do artigo usamos N=50 ativos cobrindo todos os 11 setores do S&P 500 para maximizar o rigor estatístico sobre 1.225 links diários (R² = 0.893). Já na validação de DRL usamos N=18 ativos multi-classe (ações, títulos do tesouro, ouro e bitcoin) para testar a diversificação inter-mercado. E no ecossistema completo do PORTA, o DyFO opera sobre 104 ativos com 5.356 links diários sem perda de convergência."*
+
+---
+
+### Slide 6: Resultados Preditivos Walk-Forward (50 Ativos S&P 500)
+- **Mensagem Chave:** DyFO supera amplamente GAT-Static e ROLAND em 9 janelas não-sobrepostas.
+- **Métricas:** DyFO ($R^2 = 0.893$, Spearman $\rho = 0.958$, Pearson $r = 0.952$, MAE $= 0.035$).
+- **Fala Sugerida:**
+  > *"Em 9 janelas walk-forward de teste entre 2018 e 2025, o DyFO alcançou R² de 0.893 e correlação de rank de Spearman de 0.958, superando tanto o GAT-Estático (0.565) quanto o ROLAND (0.390). O teste de Diebold-Mariano com correção Newey-West confirma significância estatística com p < 0.0001."*
+
+---
+
+### Slide 7: Estudo de Ablação: Eliminando a Diluição de Atenção
+- **Mensagem Chave:** No TGAT homogêneo, adicionar SECT derruba o R² (-0.0042); no TGAT v2 Relation-Aware, gera ganho de sinergia (+0.0410).
+- **Fala Sugerida:**
+  > *"O estudo de ablação comprova a nossa hipótese central: quando adicionamos relações estáticas de setor no TGAT homogêneo, o desempenho cai devido à diluição. No Relation-Aware TGAT v2, o condicionamento de aresta destrava a sinergia positiva, elevando o R² para 0.893 e o Sharpe proxy para 2.68."*
+
+---
+
+### Slide 8: Utilidade Econômica em Gerenciamento de Portfólio DRL
+- **Mensagem Chave:** DyFO-DRL+ bate EWMA-GMVP com 100% de win-rate (+1.72% alpha), menor turnover (0.025 vs 0.083), enquanto o Raw-DRL colapsa para a carteira $1/N$.
+- **Fala Sugerida:**
+  > *"Para validar a utilidade econômica, integramos os embeddings do DyFO a um agente DRL de alocação de portfólio. O DyFO-DRL+ superou o baseline clássico EWMA-GMVP em 100% dos episódios de teste com menor turnover. Mais importante: o agente sem grafo (Raw-DRL) colapsou monotonicamente para a alocação ingênua 1/N (entropia 2.890), provando que os embeddings relacionais são o habilitador que permite ao DRL aprender políticas eficientes."*
+
+---
+
+### Slide 9: Robustez em Regimes de Estresse (Crash do COVID-19)
+- **Mensagem Chave:** Rastreamento contínuo da rápida decorrelação do par SPY - ^VIX em março de 2020 sem lag temporal.
+- **Fala Sugerida:**
+  > *"Durante o choque de março de 2020, o DyFO rastreou com precisão a rápida decorrelação não-linear entre o SPY e o índice de volatilidade VIX, sem atraso de lag e sem sofrer contaminação por outliers graças ao Huber Loss e à codificação contínua Time2Vec."*
+
+---
+
+### Slide 10: Integração na Tríade do Doutorado (PORTA, DyFO e ORION)
+- **Mensagem Chave:** Arquitetura de software modular, contrato estritamente *read-only* com o PORTA e exportação padronizada em ontologia OWL/RDF.
+- **Fala Sugerida:**
+  > *"O DyFO não é um modelo isolado, mas o motor relacional da nossa Tríade de Doutorado. Ele consome dados curados em modo estritamente read-only do PORTA, exporta matrizes de covariância estruturais causais para os alocadores do PORTA e fornece embeddings relacionais de estado para o agente multimodal ORION."*
+
+---
+
+### Slide 11: Conclusões e Próximos Passos
+- **Mensagem Chave:** Resumo das contribuições e próximos passos da pesquisa.
+- **Fala Sugerida:**
+  > *"Em conclusão: propusemos uma modificação cirúrgica que resolve a diluição de atenção em grafos financeiros, demonstramos superioridade estatística e utilidade prática em DRL, e integramos o DyFO a um ecossistema reproduzível e robusto. Muito obrigado."*

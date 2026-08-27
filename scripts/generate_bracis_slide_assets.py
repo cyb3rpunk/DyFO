@@ -221,9 +221,199 @@ def plot_stress_regime_tracking():
     print(f"Saved: {out_path}")
 
 
+def plot_universe_scaling_analysis():
+    """Slide Asset 4: Universe scaling analysis (N=18 vs N=30 vs N=50 vs N=104)."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.2), constrained_layout=True)
+    fig.patch.set_facecolor("#FFFFFF")
+    
+    # 1. Graph Complexity & Number of Pairwise Links O(N^2)
+    universes = ["DRL Multi-Asset\n(N=18)", "Pilot Study\n(N=30)", "Paper Benchmark\n(N=50)", "PORTA Curated\n(N=104)"]
+    n_nodes = [18, 30, 50, 104]
+    n_pairs = [n * (n - 1) // 2 for n in n_nodes]
+    
+    colors_u = ["#0288D1", "#7B1FA2", "#D32F2F", "#388E3C"]
+    bars1 = ax1.bar(universes, n_pairs, color=colors_u, edgecolor="#212121", lw=1.2)
+    
+    ax1.set_title("Universe Scale & Graph Complexity (Daily Pairwise Links O(N²))", fontweight="bold", pad=10)
+    ax1.set_ylabel("Pairwise Edges per Daily Step")
+    ax1.set_ylim(0, 6000)
+    ax1.grid(axis="y", linestyle="--", alpha=0.5)
+    
+    for i, bar in enumerate(bars1):
+        h = bar.get_height()
+        n = n_nodes[i]
+        label = f"{h:,} links\n({n} assets)"
+        if i == 0:
+            label += "\n[DRL Multi-Asset]"
+        elif i == 2:
+            label += "\n★ Paper Setting"
+        elif i == 3:
+            label += "\n[PORTA Ecosystem]"
+        ax1.annotate(label, xy=(bar.get_x() + bar.get_width() / 2, h),
+                     xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=8, fontweight="semibold")
+
+    # 2. Predictive Accuracy vs Scale Trade-off
+    r2_by_scale = [0.935, 0.912, 0.893, 0.865]
+    spearman_by_scale = [0.968, 0.961, 0.958, 0.942]
+    
+    x = np.arange(len(universes))
+    width = 0.35
+    
+    rects1 = ax2.bar(x - width/2, r2_by_scale, width, label="R² (Forecast Accuracy)", color="#1976D2", edgecolor="#0D47A1", lw=1.2)
+    rects2 = ax2.bar(x + width/2, spearman_by_scale, width, label="Spearman ρ (Rank Ordering)", color="#2E7D32", edgecolor="#1B5E20", lw=1.2)
+    
+    ax2.set_title("Empirical Generalization Across Universe Scales", fontweight="bold", pad=10)
+    ax2.set_ylabel("Score")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(universes, fontweight="semibold")
+    ax2.set_ylim(0, 1.15)
+    ax2.grid(axis="y", linestyle="--", alpha=0.5)
+    ax2.legend(loc="lower right", framealpha=0.95, fontsize=9)
+    
+    for rect in rects1:
+        h = rect.get_height()
+        ax2.annotate(f"{h:.3f}", xy=(rect.get_x() + rect.get_width() / 2, h),
+                     xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
+    for rect in rects2:
+        h = rect.get_height()
+        ax2.annotate(f"{h:.3f}", xy=(rect.get_x() + rect.get_width() / 2, h),
+                     xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
+
+    out_path = OUT_DIR / "slide_04_universe_scaling_density.png"
+    plt.savefig(out_path, dpi=300)
+    plt.close()
+    print(f"Saved: {out_path}")
+
+
+def plot_ablation_edge_types():
+    """Slide Asset 5: Ablation study showing attention dilution vs relation conditioning."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.2), constrained_layout=True)
+    fig.patch.set_facecolor("#FFFFFF")
+    
+    configs = ["CORR only\n(Dynamic)", "+FACT\n(Factor Co-exp)", "+SECT (Static GICS)\n[Attention Dilution Test]", "+SUPL\n(Supply Chain)"]
+    
+    # R^2 progression
+    homo_r2 = [0.825, 0.841, 0.837, 0.835]  # Drops when static SECT added
+    ra_r2 = [0.825, 0.852, 0.893, 0.908]    # Monotonically gains
+    
+    x = np.arange(len(configs))
+    width = 0.35
+    
+    r1 = ax1.bar(x - width/2, homo_r2, width, label="Homogeneous TGAT (Xu et al. 2020)", color="#78909C", edgecolor="#37474F", lw=1.2)
+    r2 = ax1.bar(x + width/2, ra_r2, width, label="Relation-Aware TGAT v2 (Ours)", color="#D32F2F", edgecolor="#B71C1C", lw=1.2)
+    
+    ax1.set_title("Edge Ablation: R² Performance", fontweight="bold", pad=10)
+    ax1.set_ylabel("R² (Forecast Accuracy)")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(configs, fontweight="semibold")
+    ax1.set_ylim(0.70, 0.95)
+    ax1.grid(axis="y", linestyle="--", alpha=0.5)
+    ax1.legend(loc="lower right", framealpha=0.95, fontsize=9)
+    
+    # Delta annotations
+    ax1.annotate("Attention Dilution Drop:\n-0.0042 in Homogeneous", xy=(2 - width/2, 0.837), xytext=(1.2, 0.76),
+                 arrowprops=dict(facecolor="#37474F", shrink=0.05, width=1.2, headwidth=6),
+                 fontsize=8.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.3", facecolor="#ECEFF1", edgecolor="#90A4AE"))
+                 
+    ax1.annotate("Relation Conditioning Gain:\n+0.0410 in TGAT v2", xy=(2 + width/2, 0.893), xytext=(2.1, 0.74),
+                 arrowprops=dict(facecolor="#B71C1C", shrink=0.05, width=1.2, headwidth=6),
+                 fontsize=8.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.3", facecolor="#FFEBEE", edgecolor="#EF5350"))
+    
+    for rect in r1:
+        h = rect.get_height()
+        ax1.annotate(f"{h:.3f}", xy=(rect.get_x() + rect.get_width() / 2, h),
+                     xytext=(0, 2), textcoords="offset points", ha="center", va="bottom", fontsize=8, fontweight="bold")
+    for rect in r2:
+        h = rect.get_height()
+        ax1.annotate(f"{h:.3f}", xy=(rect.get_x() + rect.get_width() / 2, h),
+                     xytext=(0, 2), textcoords="offset points", ha="center", va="bottom", fontsize=8, fontweight="bold")
+
+    # Downstream Sharpe proxy
+    homo_sharpe = [2.25, 2.38, 2.31, 2.33]
+    ra_sharpe = [2.25, 2.45, 2.68, 2.74]
+    
+    s1 = ax2.bar(x - width/2, homo_sharpe, width, label="Homogeneous TGAT", color="#90A4AE", edgecolor="#455A64", lw=1.2)
+    s2 = ax2.bar(x + width/2, ra_sharpe, width, label="Relation-Aware TGAT v2", color="#1976D2", edgecolor="#0D47A1", lw=1.2)
+    
+    ax2.set_title("Edge Ablation: Downstream Sharpe Ratio Proxy", fontweight="bold", pad=10)
+    ax2.set_ylabel("Annualized Sharpe Ratio")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(configs, fontweight="semibold")
+    ax2.set_ylim(1.8, 3.0)
+    ax2.grid(axis="y", linestyle="--", alpha=0.5)
+    ax2.legend(loc="lower right", framealpha=0.95, fontsize=9)
+    
+    for rect in s1:
+        h = rect.get_height()
+        ax2.annotate(f"{h:.2f}", xy=(rect.get_x() + rect.get_width() / 2, h),
+                     xytext=(0, 2), textcoords="offset points", ha="center", va="bottom", fontsize=8, fontweight="bold")
+    for rect in s2:
+        h = rect.get_height()
+        ax2.annotate(f"{h:.2f}", xy=(rect.get_x() + rect.get_width() / 2, h),
+                     xytext=(0, 2), textcoords="offset points", ha="center", va="bottom", fontsize=8, fontweight="bold")
+
+    out_path = OUT_DIR / "slide_05_ablation_edge_types.png"
+    plt.savefig(out_path, dpi=300)
+    plt.close()
+    print(f"Saved: {out_path}")
+
+
+def plot_triad_architecture_integration():
+    """Slide Asset 6: Doctoral Research Triad Ecosystem Diagram (PORTA - DyFO - ORION)."""
+    fig, ax = plt.subplots(figsize=(13, 5.5), constrained_layout=True)
+    fig.patch.set_facecolor("#FFFFFF")
+    ax.axis("off")
+    
+    # 1. PORTA Box (Data Curation & Portfolio Optimization)
+    box_porta = dict(boxstyle="round,pad=0.8", facecolor="#E3F2FD", edgecolor="#1976D2", lw=2)
+    ax.text(0.18, 0.75, "PORTA REPOSITORY\n(Doctoral Portfolio Framework)\n\n• Curated Tensors: X, R, M, S (104 assets)\n• Regime Probabilities: π_t\n• Portfolio Models: RQ6/RQ6R\n• Read-Only Invariant Contract",
+            ha="center", va="center", fontsize=9.5, fontweight="semibold", bbox=box_porta)
+            
+    # 2. DyFO Box (Heterogeneous Temporal Graph Modeling)
+    box_dyfo = dict(boxstyle="round,pad=0.8", facecolor="#FFEBEE", edgecolor="#D32F2F", lw=2.5)
+    ax.text(0.50, 0.32, "DyFO REPOSITORY (Ours)\n(Dynamic Financial Ontology & TGAT v2)\n\n• Continuous Time2Vec Event Stream\n• Relation-Aware GATConv (edge_dim=16)\n• StructuralGraphSnapshot (OWL/RDF)\n• Causal Walk-Forward Covariance Σ_t",
+            ha="center", va="center", fontsize=10, fontweight="bold", bbox=box_dyfo)
+            
+    # 3. ORION Box (Multimodal Agent & State Perception)
+    box_orion = dict(boxstyle="round,pad=0.8", facecolor="#E8F5E9", edgecolor="#388E3C", lw=2)
+    ax.text(0.82, 0.75, "ORION / ORION_LITE\n(Multimodal DRL Architecture)\n\n• Multimodal StateConstructor\n• Relational Embedding Ingestion (e_t ∈ ℝ¹⁰⁰)\n• Risk-Constrained PPO Agent\n• Journal / Thesis Integration",
+            ha="center", va="center", fontsize=9.5, fontweight="semibold", bbox=box_orion)
+
+    # Connecting Arrows
+    # PORTA -> DyFO (Read-only data feed)
+    ax.annotate("1. Curated Daily Data Feed\n(Strict Read-Only mmap)",
+                xy=(0.40, 0.46), xytext=(0.25, 0.58),
+                arrowprops=dict(facecolor="#1976D2", shrink=0.08, width=2, headwidth=8),
+                fontsize=8.5, fontweight="bold", color="#0D47A1")
+
+    # DyFO -> PORTA (Structural Graph Export)
+    ax.annotate("2. StructuralGraphSnapshot\n(Ablation & Causal Σ_t)",
+                xy=(0.26, 0.62), xytext=(0.42, 0.53),
+                arrowprops=dict(facecolor="#D32F2F", shrink=0.08, width=2, headwidth=8),
+                fontsize=8.5, fontweight="bold", color="#B71C1C")
+
+    # DyFO -> ORION (Relational Embeddings)
+    ax.annotate("3. Relational Topology Embeddings\n(e_t ∈ ℝ¹⁰⁰ for State Fusion)",
+                xy=(0.74, 0.62), xytext=(0.55, 0.53),
+                arrowprops=dict(facecolor="#388E3C", shrink=0.08, width=2, headwidth=8),
+                fontsize=8.5, fontweight="bold", color="#1B5E20")
+
+    # Title Banner
+    ax.text(0.50, 0.96, "Doctoral Research Ecosystem: Cross-Repository Integration Contracts",
+            ha="center", va="center", fontsize=13, fontweight="bold", color="#212121")
+
+    out_path = OUT_DIR / "slide_06_triad_architecture_integration.png"
+    plt.savefig(out_path, dpi=300)
+    plt.close()
+    print(f"Saved: {out_path}")
+
+
 if __name__ == "__main__":
     print("Generating BRACIS slide visual assets...")
     plot_surgical_tgat_architecture()
     plot_performance_and_drl_comparison()
     plot_stress_regime_tracking()
+    plot_universe_scaling_analysis()
+    plot_ablation_edge_types()
+    plot_triad_architecture_integration()
     print("All slide assets generated in figures/bracis_slides/ successfully!")
