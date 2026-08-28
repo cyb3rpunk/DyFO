@@ -48,7 +48,23 @@ class DyFOAdapter:
         self.device = device
         self.checkpoint_path = Path(checkpoint_path) if checkpoint_path else None
         self.porta_reader = porta_reader
+        self.encoder = None
         
+        # Load trained neural encoder if checkpoint provided
+        if self.checkpoint_path and self.checkpoint_path.exists():
+            try:
+                from dyfo.core.model_variants import build_encoder
+                self.encoder = build_encoder(self.config, num_nodes=self.num_nodes, device=self.device)
+                ckpt = torch.load(self.checkpoint_path, map_location=self.device)
+                if "encoder_state" in ckpt:
+                    self.encoder.load_state_dict(ckpt["encoder_state"])
+                elif "model_state_dict" in ckpt:
+                    self.encoder.load_state_dict(ckpt["model_state_dict"], strict=False)
+                self.encoder.eval()
+                logger.info("DyFOAdapter loaded trained encoder from %s", self.checkpoint_path)
+            except Exception as exc:
+                logger.warning("DyFOAdapter failed to load encoder checkpoint (%s); using projection", exc)
+
         # Internal state/mock caches for offline/live evaluation
         self._cached_embeddings: Dict[datetime.date, np.ndarray] = {}
         self._cached_graphs: Dict[datetime.date, StructuralGraphSnapshot] = {}
@@ -80,13 +96,25 @@ class DyFOAdapter:
         if as_of_date in self._cached_graphs:
             return self._cached_graphs[as_of_date]
 
-        # Generate deterministic relation-aware structure
+        # Generate relation-aware structure
         # 1. Node embeddings (N, embedding_dim=100)
-        # If PORTA curated features are available, project them into embedding space
-        if self.porta_reader is not None and self.porta_reader.is_available:
+        if self.encoder is not None and self.porta_reader is not None and self.porta_reader.is_available:
             porta_feats = self.porta_reader.get_features_at_date(as_of_date, assets=self.entity_ids)
             if porta_feats is not None:
-                # Deterministic projection to embedding_dim
+                with torch.no_grad():
+                    feat_t = torch.tensor(porta_feats, dtype=torch.float32, device=self.device)
+                    if hasattr(self.encoder, "get_node_embeddings"):
+                        node_embeddings = self.encoder.get_node_embeddings(feat_t).cpu().numpy()
+                    else:
+                        proj_mat = np.random.RandomState(42).randn(porta_feats.shape[1], self.config.embedding_dim).astype(np.float32)
+                        node_embeddings = porta_feats @ proj_mat
+            else:
+                rng = np.random.RandomState(int(as_of_date.strftime("%Y%m%d")) % (2**31 - 1))
+                node_embeddings = rng.randn(self.num_nodes, self.config.embedding_dim).astype(np.float32)
+        elif self.porta_reader is not None and self.porta_reader.is_available:
+            porta_feats = self.porta_reader.get_features_at_date(as_of_date, assets=self.entity_ids)
+            if porta_feats is not None:
+                # Deterministic projection to embedding_dim (DyFO_LITE mode)
                 proj_mat = np.random.RandomState(42).randn(porta_feats.shape[1], self.config.embedding_dim).astype(np.float32)
                 node_embeddings = porta_feats @ proj_mat
             else:

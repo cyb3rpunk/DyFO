@@ -19,8 +19,8 @@ source_commits:
   - "9352ff6"
   - "4962c58"
   - "f1ea023"
-last_compiled: 2026-08-26T23:00:00Z
-last_verified: 2026-08-26T23:00:00Z
+last_compiled: 2026-08-28T12:00:00Z
+last_verified: 2026-08-28T12:00:00Z
 confidence: high
 human_review_required: false
 tags:
@@ -30,20 +30,27 @@ tags:
   - "theme/project-map"
 ---
 
-# DyFO
+# DyFO (Heterogeneous Temporal Graph Attention with Typed Edge Conditioning for Financial Co-movement Forecasting)
 
-## Estado Atual (2026-08-26)
+## Estado Atual (2026-08-28)
 
 - **Branches ativas e consolidadas**:
   - `dev`: Base estabilizada com remediação integral de auditoria causal (REQ-D1, D2, D5, D6) e suite 46/46 GREEN.
-  - `exp/bracis_slides`: Branch de experimentos e geração de artefatos visuais para a apresentação do BRACIS 2026.
-  - `follow_on/portfolio_integration`: Implementação de `DyFOAdapter`, `StructuralGraphSnapshot`, `docs/ONTOLOGY_SCHEMA.md`, `PortaDataReader` (estritamente *read-only*), pipeline DRL causal, suíte de 6 figuras de alta resolução (300 DPI), deck de 11 slides interativo (`doc/bracis_presentation_deck.html` com imagens Base64 e fórmulas vetoriais SVG) e roteiro de falas (`doc/BRACIS_PRESENTATION_NOTES.md`).
-- **Worktree**: Único, sem órfãos.
+  - `follow_on/portfolio_integration`: 
+    - Implementação de `DyFOAdapter`, `StructuralGraphSnapshot`, `docs/ONTOLOGY_SCHEMA.md`, `PortaDataReader` (estritamente *read-only*), pipeline DRL causal.
+    - Suíte de 6 figuras de alta resolução (300 DPI) para o BRACIS 2026.
+    - Deck interativo de 11 slides (`doc/bracis_presentation_deck.html` com imagens em Base64, fórmulas vetoriais SVG e controle fullscreen) e roteiro detalhado de falas (`doc/BRACIS_PRESENTATION_NOTES.md`).
+    - Remediações de auditoria pós-BRACIS (DeepSeek/Opencode GO):
+      - **P0-1**: Default `correlation_method = "rolling_pearson"` garantindo causalidade estrita sem look-ahead de $\\bar{Q}$.
+      - **P0-2**: Leitura do tensor real de regimes `S.npy` de PORTA com fallback contínuo softmax sobre `M.npy`.
+      - **P1-1**: Mapeamento dinâmico de features por nome de coluna via `get_feature_columns()`.
+      - **P1-2**: Suporte a carregamento de checkpoint treinado em `DyFOAdapter` com fallback determinístico.
+      - **P1-3/P1-4/P1-5**: Ajuste rigoroso de nuances estatísticas (Sharpe $p=1.00$ vs colapso de simetria do Raw-DRL $1/N$, escala $N=18, 50, 100/104$) e contraste SVG $\\parallel$.
 - **Suite de testes**: 46 testes passando (`pytest` 100% green), incluindo guards causais, integridade imutável *read-only* do PORTA e exportação estrutural.
 
-## Papel no Framework do Doutorado
+## Papel no Framework do Doutorado (A Tríade)
 
-1. **Ablação e Modelagem Estrutural Relacional (PORTA)**: Gerador de $\\Sigma_t$ estrutural e topologia decomposta ($A_\\text{CORR}, A_\\text{SECT}, A_\\text{SUPL}, A_\\text{FACT}$) via `DyFOAdapter.export_structural_graph()`.
+1. **Ablação e Modelagem Estrutural Relacional (PORTA)**: Gerador de $\\mathbf{\\Sigma}_t$ estrutural e topologia decomposta ($A_\\text{CORR}, A_\\text{SECT}, A_\\text{SUPL}, A_\\text{FACT}$) via `DyFOAdapter.export_structural_graph()`.
 2. **Consumo de Dados Curados (PORTA &rarr; DyFO)**: Leitura estritamente *read-only* (sem jamais alterar dados do PORTA) de tensores curados $X, R, M, S$, probabilidades de regime $\\pi_t$ e séries de retornos via `PortaDataReader`.
 3. **Percepção Multimodal (ORION)**: Canal de embeddings relacionais temporais ($e_t \\in \\mathbb{R}^{100}$) para o `StateConstructor`.
 

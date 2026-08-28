@@ -218,19 +218,28 @@ class NodeFeatureBuilder:
         n = len(self._tickers)
         features_by_date: Dict[str, torch.Tensor] = {}
 
+        # Resolve feature column indices dynamically from PORTA metadata
+        fcols = porta_reader.get_feature_columns()
+        idx_ret = fcols.index("log_return_1d") if "log_return_1d" in fcols else (14 if fcols else 0)
+        idx_vol = fcols.index("tech_vol_21") if "tech_vol_21" in fcols else (31 if fcols else 1)
+        idx_beta = fcols.index("cross_beta_60_wrt_SPY") if "cross_beta_60_wrt_SPY" in fcols else (5 if fcols else 2)
+
         for d in dates:
             feats_mat = porta_reader.get_features_at_date(d, assets=self._tickers)
             regimes = porta_reader.get_regime_probabilities_at_date(d)
             
             node_feat = torch.zeros(n, self.feature_dim)
-            if feats_mat is not None:
+            if feats_mat is not None and feats_mat.shape[1] > 0:
                 # Map available features into node_feat slots
                 # col 0: log return (mapped from PORTA log_return_1d)
-                node_feat[:, 0] = torch.tensor(feats_mat[:, 14] if feats_mat.shape[1] > 14 else feats_mat[:, 0], dtype=torch.float32)
+                if idx_ret < feats_mat.shape[1]:
+                    node_feat[:, 0] = torch.tensor(feats_mat[:, idx_ret], dtype=torch.float32)
                 # col 1: vol 21d (mapped from PORTA tech_vol_21)
-                node_feat[:, 1] = torch.tensor(feats_mat[:, 31] if feats_mat.shape[1] > 31 else feats_mat[:, 1], dtype=torch.float32)
+                if idx_vol < feats_mat.shape[1]:
+                    node_feat[:, 1] = torch.tensor(feats_mat[:, idx_vol], dtype=torch.float32)
                 # col 2: beta vs SPY (mapped from PORTA cross_beta_60_wrt_SPY)
-                node_feat[:, 2] = torch.tensor(feats_mat[:, 5] if feats_mat.shape[1] > 5 else feats_mat[:, 2], dtype=torch.float32)
+                if idx_beta < feats_mat.shape[1]:
+                    node_feat[:, 2] = torch.tensor(feats_mat[:, idx_beta], dtype=torch.float32)
 
             # Regime prob slot: col (feature_dim - num_regimes - 1) .. (feature_dim - 1)
             reg_start = self.feature_dim - self._num_regimes - 1

@@ -40,36 +40,36 @@
 
 ---
 
-### Slide 5: Escalaridade de Universo: N=18 (DRL), N=50 (Paper) e N=104 (PORTA)
+### Slide 5: Escalaridade de Universo: N=18 (DRL), N=50 (Paper) e N=100 (S&P 100) / N=104 (PORTA)
 - **Mensagem Chave:** **Diferenciação transparente e justificada do número de tickers em cada experimento.**
 - **Dados:**
-  - $N=18$ (Multi-Asset Class): 153 links/dia (Ações, TLT, GLD, BTC-USD) &rarr; Foco em balanceamento de alocação DRL.
-  - $N=50$ (Paper Benchmark): 1.225 links/dia em 11 setores GICS &rarr; Foco em significância estatística do link-prediction.
-  - $N=104$ (PORTA Ecosystem): 5.356 links/dia &rarr; Escala industrial de longo prazo (2005–2026).
+  - $N=18$ (Multi-Asset Class): 153 links/dia (Ações, TLT, GLD, BTC-USD) &rarr; Foco em balanceamento de alocação DRL e quebra de simetria.
+  - $N=50$ (Paper Benchmark): 1.225 links/dia em 11 setores GICS &rarr; Foco em significância estatística do link-prediction puro ($R^2 = 0.893$).
+  - $N=100$ (S&P 100) / $N=104$ (PORTA Ecosystem): 4.950 a 5.356 links/dia &rarr; Escala ampla com sparsificação por limiar ($\tau = 0.3$), mantendo $R^2 = 0.865$ (TMFG em roadmap).
 - **Fala Sugerida:**
-  > *"É crucial destacar a distinção de escala entre os nossos experimentos: no benchmark preditivo do artigo usamos N=50 ativos cobrindo todos os 11 setores do S&P 500 para maximizar o rigor estatístico sobre 1.225 links diários (R² = 0.893). Já na validação de DRL usamos N=18 ativos multi-classe (ações, títulos do tesouro, ouro e bitcoin) para testar a diversificação inter-mercado. E no ecossistema completo do PORTA, o DyFO opera sobre 104 ativos com 5.356 links diários sem perda de convergência."*
+  > *"É crucial destacar a distinção de escala entre os nossos experimentos: no benchmark preditivo do artigo usamos N=50 ativos cobrindo todos os 11 setores do S&P 500 para maximizar o rigor estatístico sobre 1.225 links diários (R² = 0.893). Na validação de DRL usamos N=18 ativos multi-classe (ações, títulos do tesouro, ouro e bitcoin) para testar alocação inter-mercado. E no universo amplo de N=100 (S&P 100) e N=104 do ecossistema PORTA, com até 5.356 links diários, o modelo mantém alta estabilidade com sparsificação por limiar."*
 
 ---
 
 ### Slide 6: Resultados Preditivos Walk-Forward (50 Ativos S&P 500)
 - **Mensagem Chave:** DyFO supera amplamente GAT-Static e ROLAND em 9 janelas não-sobrepostas.
-- **Métricas:** DyFO ($R^2 = 0.893$, Spearman $\rho = 0.958$, Pearson $r = 0.952$, MAE $= 0.035$).
+- **Métricas:** DyFO ($R^2 = 0.893$, Spearman $\rho = 0.958$, Pearson $r = 0.952$, MAE $= 0.035$) vs GAT-Static ($0.684$ no paper / $0.565$ em estresse) e ROLAND ($0.518$ no paper / $0.390$ em estresse).
 - **Fala Sugerida:**
-  > *"Em 9 janelas walk-forward de teste entre 2018 e 2025, o DyFO alcançou R² de 0.893 e correlação de rank de Spearman de 0.958, superando tanto o GAT-Estático (0.565) quanto o ROLAND (0.390). O teste de Diebold-Mariano com correção Newey-West confirma significância estatística com p < 0.0001."*
+  > *"Em 9 janelas walk-forward de teste entre 2018 e 2025, o DyFO alcançou R² de 0.893 e correlação de rank de Spearman de 0.958, superando tanto o GAT-Estático (0.684 global / 0.565 em estresse) quanto o ROLAND (0.518 global / 0.390 em estresse). O teste de Diebold-Mariano com correção Newey-West confirma significância estatística com p < 0.0001."*
 
 ---
 
 ### Slide 7: Estudo de Ablação: Eliminando a Diluição de Atenção
 - **Mensagem Chave:** No TGAT homogêneo, adicionar SECT derruba o R² (-0.0042); no TGAT v2 Relation-Aware, gera ganho de sinergia (+0.0410).
 - **Fala Sugerida:**
-  > *"O estudo de ablação comprova a nossa hipótese central: quando adicionamos relações estáticas de setor no TGAT homogêneo, o desempenho cai devido à diluição. No Relation-Aware TGAT v2, o condicionamento de aresta destrava a sinergia positiva, elevando o R² para 0.893 e o Sharpe proxy para 2.68."*
+  > *"O estudo de ablação comprova a nossa hipótese central: quando adicionamos relações estáticas de setor no TGAT homogêneo, o desempenho cai devido à diluição de atenção. No Relation-Aware TGAT v2, o condicionamento de aresta destrava a sinergia positiva, elevando o R² para 0.893 e o Sharpe proxy para 2.68."*
 
 ---
 
 ### Slide 8: Utilidade Econômica em Gerenciamento de Portfólio DRL
-- **Mensagem Chave:** DyFO-DRL+ bate EWMA-GMVP com 100% de win-rate (+1.72% alpha), menor turnover (0.025 vs 0.083), enquanto o Raw-DRL colapsa para a carteira $1/N$.
+- **Mensagem Chave:** DyFO-DRL+ bate EWMA-GMVP em retorno acumulado (+1.72% alpha, $p=0.0312$) com turnover 63% menor (0.025 vs 0.083), enquanto o Raw-DRL colapsa para $1/N$. Ressalva estatística honesta: o ganho de Sharpe ($+0.153$, $p=1.00$) não atinge significância no regime avaliado e apresenta maior drawdown em cauda.
 - **Fala Sugerida:**
-  > *"Para validar a utilidade econômica, integramos os embeddings do DyFO a um agente DRL de alocação de portfólio. O DyFO-DRL+ superou o baseline clássico EWMA-GMVP em 100% dos episódios de teste com menor turnover. Mais importante: o agente sem grafo (Raw-DRL) colapsou monotonicamente para a alocação ingênua 1/N (entropia 2.890), provando que os embeddings relacionais são o habilitador que permite ao DRL aprender políticas eficientes."*
+  > *"Para validar a utilidade econômica, integramos os embeddings do DyFO a um agente DRL de alocação de portfólio. O DyFO-DRL+ superou o baseline clássico EWMA-GMVP em retorno acumulado (+1.72%, p=0.0312) com turnover 63% menor. Cabe pontuar com rigor estatístico que o ganho em Sharpe (+0.153) não atinge significância estatística (p=1.00) e o drawdown de cauda é maior, indicando utilidade econômica promissora. O achado mais crítico é o diagnóstico de colapso: o agente sem grafo (Raw-DRL) colapsa monotonicamente para a carteira ingênua 1/N (entropia 2.890 ≈ ln 18), provando que os embeddings relacionais são o habilitador que quebra a simetria e viabiliza o aprendizado de fronteiras eficientes."*
 
 ---
 
@@ -88,6 +88,6 @@
 ---
 
 ### Slide 11: Conclusões e Próximos Passos
-- **Mensagem Chave:** Resumo das contribuições e próximos passos da pesquisa.
+- **Mensagem Chave:** Resumo das contribuições, transparência causal (rolling Pearson causal mitigando vazamentos de Q incondicional) e roadmap de publicações.
 - **Fala Sugerida:**
-  > *"Em conclusão: propusemos uma modificação cirúrgica que resolve a diluição de atenção em grafos financeiros, demonstramos superioridade estatística e utilidade prática em DRL, e integramos o DyFO a um ecossistema reproduzível e robusto. Muito obrigado."*
+  > *"Em conclusão: propusemos uma modificação cirúrgica que resolve a diluição de atenção em grafos financeiros, demonstramos superioridade preditiva causal estrita e utilidade prática em DRL, e integramos o DyFO a um ecossistema reproduzível e robusto. Muito obrigado."*

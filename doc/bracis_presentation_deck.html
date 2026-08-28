@@ -439,13 +439,13 @@
               <text x="502" y="44" fill="#ffffff" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28">h</text>
               <text x="520" y="52" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="20">i</text>
               
-              <text x="542" y="44" fill="#64748b" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="26">∥</text>
+              <text x="542" y="44" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="26">∥</text>
               
               <text x="566" y="44" fill="#ffffff" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28">W</text>
               <text x="596" y="44" fill="#ffffff" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28">h</text>
               <text x="614" y="52" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="20">j</text>
               
-              <text x="636" y="44" fill="#64748b" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="26">∥</text>
+              <text x="636" y="44" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="26">∥</text>
               
               <rect x="658" y="14" width="140" height="42" rx="8" fill="rgba(16, 185, 129, 0.2)" stroke="#10b981" stroke-width="1.5"/>
               <text x="668" y="44" fill="#10b981" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="28">W</text>
@@ -481,11 +481,11 @@
     <div class="slide" id="slide-5">
       <div class="slide-header">
         <div class="slide-category">Protocolo Experimental & Escala</div>
-        <h2 class="slide-title">Escalaridade de Universo: N=18 (DRL), N=50 (Paper) e N=104 (PORTA)</h2>
+        <h2 class="slide-title">Escalaridade de Universo: N=18 (DRL), N=50 (Paper) e N=100 (S&P 100)</h2>
       </div>
       <div class="slide-content">
         <div class="text-column">
-          <p><strong>Diferenciação Crítica de Universos Experimentais:</strong></p>
+          <p><strong>Diferenciação Crítica de Escalas Experimentais:</strong></p>
           <ul>
             <li><strong>Benchmark do Artigo (\(N=50\) Ações S&P 500):</strong>
               <ul>
@@ -495,17 +495,17 @@
             </li>
             <li><strong>Painel DRL Multi-Ativo (\(N=18\) Ativos):</strong>
               <ul>
-                <li>Painel balanceado de 4 classes: Ações, Treasuries (TLT), Ouro (GLD), Cripto (BTC-USD). Foco em utilidade de alocação multivariada.</li>
+                <li>Painel balanceado de 4 classes: Ações, Treasuries (TLT), Ouro (GLD), Cripto (BTC-USD). Foco em utilidade de alocação e quebra de simetria.</li>
               </ul>
             </li>
-            <li><strong>Ecosistema Completo (\(N=104\) Ativos PORTA):</strong>
+            <li><strong>Benchmark Amplo (\(N=100\) S&P 100 / \(N=104\) PORTA Pool):</strong>
               <ul>
-                <li><strong>5.356 pares/dia</strong> (2005–2026). Escala de alta densidade computacional com R² = 0.865.</li>
+                <li><strong>4.950 a 5.356 pares/dia</strong>. Mantém R² = 0.865 (sparsificação por limiar \(\tau=0.3\); TMFG completo em roadmap).</li>
               </ul>
             </li>
           </ul>
           <div class="callout">
-            <strong>Insight Metodológico:</strong> O número de conexões cresce em \(O(N^2)\). O TGAT v2 mantém estabilidade de convergência e alto R² em todas as escalas.
+            <strong>Insight Metodológico:</strong> O grafo cresce em \(O(N^2)\). O TGAT v2 mantém alta capacidade preditiva mesmo sob densidade combinatorial extrema.
           </div>
         </div>
         <div class="img-column">
@@ -527,8 +527,8 @@
           <ul style="margin-top: 10px;">
             <li><strong>DyFO (TGAT v2):</strong> <span class="highlight-green">R² = 0.893</span> | <span class="highlight-green">Spearman ρ = 0.958</span> (MAE = 0.035, Pearson r = 0.952).</li>
             <li><strong>DyFO (TGN):</strong> R² = 0.803 | Spearman ρ = 0.932 (deriva por memória recorrente).</li>
-            <li><strong>GAT-Static:</strong> R² = 0.565 | Spearman ρ = 0.902 (perde dinâmica temporal contínua).</li>
-            <li><strong>ROLAND:</strong> R² = 0.390 | Spearman ρ = 0.752 (degradação por discretização em snapshots).</li>
+            <li><strong>GAT-Static:</strong> R² = 0.684 (0.565 em estresse) | Spearman ρ = 0.902.</li>
+            <li><strong>ROLAND:</strong> R² = 0.518 (0.390 em estresse) | Spearman ρ = 0.752 (degradação por snapshots).</li>
           </ul>
           <div class="callout">
             <strong>Significância Estatística:</strong> Teste Diebold-Mariano (HAC Newey-West) e Wilcoxon com correção Holm-Bonferroni confirmam superioridade preditiva (\(p < 0.0001\)).
@@ -585,12 +585,12 @@
         <div class="text-column">
           <p>Otimização de alocação em painel multi-ativo (18 ativos, 4 classes: Ações, Bonds, Ouro, Cripto):</p>
           <ul>
-            <li><strong>Superação do EWMA-GMVP:</strong> DyFO-DRL+ atinge <strong>100% de win-rate</strong> em retorno acumulado (\(+1.72\%\) alpha, \(p=0.0312\)) com menor turnover (0.025 vs 0.083).</li>
-            <li><strong>Alocação Não-Trivial:</strong> DyFO aprende pesos seletivos (\(\text{entropia} = 2.615 < \ln 18 = 2.890\)).</li>
-            <li><strong>Diagnóstico de Colapso do Raw-DRL:</strong> O agente sem grafo (Raw-DRL) colapsa monotonicamente para a alocação uniforme ingênua \(1/N\) (\(\text{entropia} = 2.890\)).</li>
+            <li><strong>Retorno e Turnover:</strong> DyFO-DRL+ supera EWMA-GMVP em retorno acumulado (\(+1.72\%\) alpha, \(p=0.0312\)) com turnover 63% menor (0.025 vs 0.083).</li>
+            <li><strong>Ressalva Estatística de Risco:</strong> O ganho em Sharpe (\(+0.153\)) não atinge significância (\(p=1.00\)) e apresenta maior drawdown em cauda — evidência promissora de utilidade econômica.</li>
+            <li><strong>Quebra de Simetria do Raw-DRL:</strong> O agente sem grafo (Raw-DRL) colapsa para a alocação ingênua \(1/N\) (\(\text{entropia} = 2.890 \approx \ln 18\)); os embeddings do DyFO quebram a simetria (\(H = 2.615\)).</li>
           </ul>
           <div class="callout">
-            <strong>Conclusão:</strong> Os embeddings relacionais do DyFO são o fator habilitador que permite ao DRL convergir para fronteiras eficientes.
+            <strong>Conclusão Honesta:</strong> A modelagem relacional impede o colapso degenerado da política e viabiliza a exploração de fronteiras de risco.
           </div>
         </div>
         <div class="img-column">
@@ -668,11 +668,11 @@
               </ul>
             </div>
             <div class="card-box" style="border-left: 4px solid var(--accent-blue);">
-              <h4 style="color: var(--accent-blue); font-size: 1.15rem; margin-bottom: 8px;">Roadmap de Publicação & Pesquisa</h4>
+              <h4 style="color: var(--accent-blue); font-size: 1.15rem; margin-bottom: 8px;">Transparência Metodológica & Roadmap</h4>
               <ul style="font-size: 0.95rem; margin-left: 16px;">
-                <li><strong>Artigo BRACIS:</strong> Foco no modelo TGAT Relation-Aware e validação empírica em grafos temporais.</li>
-                <li><strong>Journal de Finanças / Inteligência Artificial:</strong> Extensão da tríade completa (PORTA + DyFO + ORION) em dados intraday de alta frequência.</li>
-                <li><strong>Código Aberto & Reprodutibilidade:</strong> Repositório modular, documentado e com testes 100% causais.</li>
+                <li><strong>Causalidade Estrita:</strong> Adoção de rolling Pearson (\([t-W, t]\)) para mitigar vazamento de \(Q\) incondicional em DCC full-sample.</li>
+                <li><strong>Journal de Finanças / IA:</strong> Extensão da tríade completa (PORTA + DyFO + ORION) em dados intraday e sparsificação TMFG.</li>
+                <li><strong>Código Aberto & Reprodutibilidade:</strong> Repositório modular, documentado e com testes de causalidade 100% verdes.</li>
               </ul>
             </div>
           </div>

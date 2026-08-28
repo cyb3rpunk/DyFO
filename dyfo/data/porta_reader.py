@@ -237,21 +237,29 @@ class PortaDataReader:
             # Deterministic default uniform if PORTA not loaded
             return np.array([0.60, 0.30, 0.10], dtype=np.float32)
 
+        # 1. Check for real Regime State tensor S.npy from PORTA RDM
+        s_path = self.features_dir / "S.npy"
+        if s_path.exists():
+            s_mmap = np.load(s_path, mmap_mode="r")
+            s_val = int(s_mmap[t_idx])
+            # Map discrete regime states {-1: Crisis, 0: Turbulent, 1: Calm} into smoothed probabilities
+            if s_val == 1:
+                return np.array([0.85, 0.12, 0.03], dtype=np.float32)
+            elif s_val == -1:
+                return np.array([0.05, 0.20, 0.75], dtype=np.float32)
+            elif s_val == 0:
+                return np.array([0.20, 0.65, 0.15], dtype=np.float32)
+
+        # 2. Fallback to continuous Macro Tensor M.npy via softmax
         m_path = self.features_dir / "M.npy"
         if m_path.exists():
             m_mmap = np.load(m_path, mmap_mode="r")
             # In daily_core, M contains macro variables (e.g. term spread, yield, vol)
             m_t = np.array(m_mmap[t_idx], dtype=np.float32)
-            # Use trailing volatility and yield curve spread to construct deterministic posterior
             macro_score = float(np.tanh(np.nan_to_num(m_t).mean()))
-            if macro_score < -0.2:
-                # Crisis state
-                return np.array([0.15, 0.25, 0.60], dtype=np.float32)
-            elif macro_score > 0.3:
-                # Calm expansion
-                return np.array([0.75, 0.20, 0.05], dtype=np.float32)
-            else:
-                # Mixed / turbulent
-                return np.array([0.30, 0.55, 0.15], dtype=np.float32)
+            # Continuous softmax projection over 3 canonical regime states
+            logits = np.array([macro_score * 2.0, 0.0, -macro_score * 2.0], dtype=np.float32)
+            exp_l = np.exp(logits - np.max(logits))
+            return (exp_l / exp_l.sum()).astype(np.float32)
 
         return np.array([0.60, 0.30, 0.10], dtype=np.float32)
