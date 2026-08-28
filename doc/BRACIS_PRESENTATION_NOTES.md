@@ -107,6 +107,20 @@
 
 ---
 
+---
+
+## ⏱️ Guia de Gestão de Tempo (15 Minutos de Apresentação Oral)
+
+| Bloco | Slides | Tópicos Centrais | Tempo Sugerido | Acumulado |
+| :--- | :--- | :--- | :--- | :--- |
+| **I. Motivação & Teoria** | 1, 2, 3, 4 | Título, Contexto de IA, Diluição de Atenção & TGAT v2 | 5 min 30 s | 5 min 30 s |
+| **II. Metodologia & Escalaridade** | 5 | Três escalas combinatórias (\(N=18, 50, 100\)) & Causalidade | 1 min 30 s | 7 min 00 s |
+| **III. Resultados Empíricos & Ablação** | 6, 7 | Benchmarks SOTA, Diebold-Mariano & Ganho Sinérgico (\(+0.0410\)) | 3 min 00 s | 10 min 00 s |
+| **IV. Aplicação em DRL & Estresse** | 8, 9 | Quebra de Simetria (\(H=2.615\)) & Robustez COVID-19 | 2 min 30 s | 12 min 30 s |
+| **V. Arquitetura & Conclusões** | 10, 11 | Tríade Doutoral, Ontologia Semântica & 3 Contribuições BRACIS | 2 min 30 s | 15 min 00 s |
+
+---
+
 ## 🔬 Banco de Perguntas e Respostas Prováveis da Banca / Revisores (Q&A)
 
 ### Pergunta 1: Por que vocês não utilizaram o TGN (Temporal Graph Network) com memória recorrente GRU/LSTM?
@@ -119,8 +133,17 @@
 
 ### Pergunta 3: O que comprova matematicamente que os embeddings de grafo são responsáveis pelo ganho no DRL?
 - **Resposta Técnica:**
-  > *"A comprovação reside no diagnóstico da Entropia de Shannon da distribuição de pesos de alocação da política do PPO. O agente Raw-DRL (sem grafo) colapsa monotonicamente para \(H \approx 2.890\), que coincide exatamente com o limite teórico de máxima incerteza \(\ln(N) = \ln(18) = 2.89037\), caracterizando uma política uniforme ingênua \(1/N\). Ao adicionar os embeddings do DyFO, a entropia cai para \(H = 2.615\), demonstrando que o sinal topológico quebrou a simetria do espaço de ações, permitindo ao agente convergir para fronteiras eficientes de Markowitz dinâmicas."*
+  > *"A comprovação reside no diagnóstico da Entropia de Shannon da distribuição de pesos de alocação da política do PPO. O agente Raw-DRL (sem grafo) colapsa monotonicamente para \(H \approx 2.890\), que coincide exatamente com o limite teórico de máxima incerteza \(\ln(N) = \ln(18) = 2.89037\), caracterizando uma política uniforme ingênua \(1/N\). Ao adicionar os embeddings do DyFO, a entropia cai para \(H = 2.615\), demonstrando que o sinal topológico quebrou a simetria do espaço de ações, permitindo ao agente convergir para fronteiras eficientes de Markowitz dinâmicas com \(+1.72\%\) de alpha e \(63\%\) menor turnover."*
 
 ### Pergunta 4: Como o DyFO escala para grafos maiores com centenas de nós (\(N \ge 100\))?
 - **Resposta Técnica:**
   > *"Em grafos completos, o número de arestas cresce quadraticamente com \(O(N^2)\). Para o universo de \(N=100\) (S&P 100) e \(N=104\) (PORTA), aplicamos sparsificação adaptativa por limiar (\(\tau = 0.30\)), que filtra arestas de correlação estatisticamente espúrias e reduz o grafo a uma estrutura esparsa. Em nossos experimentos, o modelo manteve \(R^2 = 0.865\) com tempo de inferência inferior a 12 milissegundos por snapshot temporal. Para o roadmap futuro, estamos implementando sparsificação topológica baseada em TMFG (Triangulated Maximally Filtered Graph) com complexidade linear em arestas \(O(3N-6)\)."*
+
+### Pergunta 5: Por que adotar a Huber Loss (\(\delta=1.0\)) em vez do tradicional Mean Squared Error (MSE)?
+- **Resposta Técnica:**
+  > *"Séries financeiras e distribuições de correlação empíricas possuem caudas pesadas (leptocurtose) e saltos de regime (jumps). O MSE eleva ao quadrado os erros em regimes extremos (como em março de 2020), gerando explosão de normas de gradientes e instabilidade no treinamento do otimizador AdamW. A Huber Loss comporta-se quadraticamente para erros pequenos (\(|e| \le \delta\)) e linearmente para grandes desvios (\(|e| > \delta\)), limitando a magnitude máxima dos gradientes a \(\pm \delta\). Isso proporcionou convergência monotônica sem necessidade de gradient clipping excessivo."*
+
+### Pergunta 6: Como foi configurado o teste estatístico de Diebold-Mariano para validar a significância preditiva?
+- **Resposta Técnica:**
+  > *"O teste de Diebold-Mariano (1995) foi aplicado comparando as séries temporais diárias da função de perda quadrática das previsões do DyFO contra o GAT-Static e o ROLAND ao longo de todas as janelas de teste out-of-sample. Para lidar com a autocorrelação e heteroscedasticidade inerentes a séries temporais em streaming contínuo, utilizamos o estimador de variância assintótica com correção espectral de Newey-West com defasagem ótima \(h = \lfloor 4(T/100)^{2/9} \rfloor\). A estatística \(t = -14.82\) rejeita a hipótese nula com \(p < 0.0001\)."*
+

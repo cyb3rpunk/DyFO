@@ -83,18 +83,36 @@
       width: 94%;
       max-width: 1320px;
       height: 88%;
+      max-height: 88vh;
       background: var(--bg-card);
       border: 1px solid var(--border-color);
       border-radius: 16px;
-      padding: 34px 44px;
+      padding: 28px 38px;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
+      justify-content: flex-start;
+      overflow-y: auto;
+      overflow-x: hidden;
       opacity: 0;
-      transform: scale(0.96) translateX(40px);
+      transform: scale(0.97) translateX(30px);
       pointer-events: none;
-      transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: opacity 0.28s cubic-bezier(0.4, 0, 0.2, 1), transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
       box-shadow: 0 25px 35px -5px rgba(0, 0, 0, 0.6), 0 12px 15px -5px rgba(0, 0, 0, 0.4);
+    }
+
+    .slide::-webkit-scrollbar {
+      width: 6px;
+    }
+    .slide::-webkit-scrollbar-track {
+      background: rgba(11, 19, 41, 0.5);
+      border-radius: 4px;
+    }
+    .slide::-webkit-scrollbar-thumb {
+      background: #243552;
+      border-radius: 4px;
+    }
+    .slide::-webkit-scrollbar-thumb:hover {
+      background: var(--accent-blue);
     }
 
     .slide.active {
@@ -231,6 +249,58 @@
       font-size: 0.95rem;
     }
 
+    /* Header Controls */
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .slide-select {
+      background-color: #0b1329;
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .slide-select:hover, .slide-select:focus {
+      border-color: var(--accent-blue);
+    }
+
+    /* Progress Dots */
+    .progress-dots {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #243552;
+      cursor: pointer;
+      transition: all 0.25s ease;
+    }
+
+    .dot:hover {
+      background: var(--accent-blue);
+      transform: scale(1.25);
+    }
+
+    .dot.active {
+      background: var(--accent-emerald);
+      width: 26px;
+      border-radius: 5px;
+      box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+    }
+
     /* Footer */
     footer {
       background-color: rgba(21, 34, 56, 0.85);
@@ -239,6 +309,7 @@
       justify-content: space-between;
       align-items: center;
       border-top: 1px solid var(--border-color);
+      z-index: 100;
     }
 
     .controls {
@@ -255,14 +326,19 @@
       border-radius: 8px;
       font-weight: 600;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: background 0.2s, transform 0.1s;
       display: flex;
       align-items: center;
       gap: 6px;
     }
 
-    button:hover {
+    button:hover:not(:disabled) {
       background-color: #334b73;
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
     }
 
     .btn-primary {
@@ -270,15 +346,17 @@
       color: #0b1329;
     }
 
-    .btn-primary:hover {
+    .btn-primary:hover:not(:disabled) {
       background-color: #059669;
       color: #ffffff;
     }
 
     .slide-counter {
       font-weight: 700;
-      color: var(--text-muted);
+      color: var(--accent-blue);
       font-size: 0.92rem;
+      min-width: 100px;
+      text-align: right;
     }
 
     .grid-2col {
@@ -302,7 +380,22 @@
       <span>DyFO Research</span>
       <span class="badge">BRACIS 2026 Presentation</span>
     </div>
-    <div class="slide-counter" id="slideIndicator">Slide 1 de 11</div>
+    <div class="header-right">
+      <select class="slide-select" id="slideSelect" onchange="showSlide(parseInt(this.value))">
+        <option value="1">1. Título & Visão Geral</option>
+        <option value="2">2. Contexto & Não-Estacionariedade</option>
+        <option value="3">3. Diagnóstico: Diluição de Atenção</option>
+        <option value="4">4. Relation-Aware TGAT v2</option>
+        <option value="5">5. Escalaridade Combinatória (N=18, 50, 100)</option>
+        <option value="6">6. Validação Empírica & SOTA</option>
+        <option value="7">7. Estudo de Ablação</option>
+        <option value="8">8. Regularização em DRL & Simetria</option>
+        <option value="9">9. Robustez em Regimes de Estresse</option>
+        <option value="10">10. Tríade do Doutorado & Ontologia</option>
+        <option value="11">11. Conclusões & Contribuições em IA</option>
+      </select>
+      <div class="slide-counter" id="slideIndicator">Slide 1 de 11</div>
+    </div>
   </header>
 
   <div class="slide-viewport">
@@ -334,9 +427,6 @@
       </div>
     </div>
 
-    <!-- SLIDE 2: Financial Graphs Motivation -->
-    <div class="slide" id="slide-2">
-      <div class="slide-header">
     <!-- SLIDE 2: Context & Motivation -->
     <div class="slide" id="slide-2">
       <div class="slide-header">
@@ -689,9 +779,11 @@
   </div>
 
   <footer>
-    <div>
+    <div style="display: flex; align-items: center; gap: 14px;">
       <button onclick="toggleFullScreen()">⛶ Tela Cheia</button>
+      <span style="font-size: 0.8rem; color: var(--text-muted);">Atalhos: [← / → / Espaço / 1-9]</span>
     </div>
+    <div class="progress-dots" id="progressDots"></div>
     <div class="controls">
       <button id="prevBtn" onclick="changeSlide(-1)">◀ Anterior</button>
       <button id="nextBtn" class="btn-primary" onclick="changeSlide(1)">Próximo ▶</button>
@@ -702,20 +794,61 @@
     let currentSlide = 1;
     const totalSlides = 11;
 
+    function initProgressDots() {
+      const container = document.getElementById('progressDots');
+      if (!container) return;
+      container.innerHTML = '';
+      for (let i = 1; i <= totalSlides; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'dot' + (i === 1 ? ' active' : '');
+        dot.title = `Ir para slide ${i}`;
+        dot.onclick = () => showSlide(i);
+        container.appendChild(dot);
+      }
+    }
+
     function showSlide(index) {
       if (index < 1) index = 1;
       if (index > totalSlides) index = totalSlides;
       
-      document.querySelectorAll('.slide').forEach(s => s.classList.remove('active'));
-      const activeSlide = document.getElementById(`slide-${index}`);
-      if (activeSlide) {
-        activeSlide.classList.add('active');
-        currentSlide = index;
-        document.getElementById('slideIndicator').innerText = `Slide ${currentSlide} de ${totalSlides}`;
+      currentSlide = index;
+
+      document.querySelectorAll('.slide').forEach((s) => {
+        if (s.id === `slide-${index}`) {
+          s.classList.add('active');
+          s.scrollTop = 0;
+        } else {
+          s.classList.remove('active');
+        }
+      });
+
+      const indicator = document.getElementById('slideIndicator');
+      if (indicator) {
+        indicator.innerText = `Slide ${currentSlide} de ${totalSlides}`;
       }
 
-      document.getElementById('prevBtn').disabled = (currentSlide === 1);
-      document.getElementById('nextBtn').innerText = (currentSlide === totalSlides) ? 'Reiniciar ↺' : 'Próximo ▶';
+      const select = document.getElementById('slideSelect');
+      if (select) {
+        select.value = currentSlide;
+      }
+
+      const dots = document.querySelectorAll('.dot');
+      dots.forEach((dot, idx) => {
+        if (idx + 1 === currentSlide) {
+          dot.classList.add('active');
+        } else {
+          dot.classList.remove('active');
+        }
+      });
+
+      const prevBtn = document.getElementById('prevBtn');
+      if (prevBtn) {
+        prevBtn.disabled = (currentSlide === 1);
+      }
+      const nextBtn = document.getElementById('nextBtn');
+      if (nextBtn) {
+        nextBtn.innerText = (currentSlide === totalSlides) ? 'Reiniciar ↺' : 'Próximo ▶';
+      }
     }
 
     function changeSlide(direction) {
@@ -737,14 +870,33 @@
     }
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
-        changeSlide(1);
-      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-        changeSlide(-1);
+      if (['ArrowRight', ' ', 'PageDown', 'l', 'L', 'n', 'N'].includes(e.key)) {
+        if (e.target.tagName !== 'SELECT') {
+          e.preventDefault();
+          changeSlide(1);
+        }
+      } else if (['ArrowLeft', 'PageUp', 'Backspace', 'h', 'H', 'p', 'P'].includes(e.key)) {
+        if (e.target.tagName !== 'SELECT') {
+          e.preventDefault();
+          changeSlide(-1);
+        }
+      } else if (e.key === 'Home') {
+        showSlide(1);
+      } else if (e.key === 'End') {
+        showSlide(totalSlides);
       } else if (e.key === 'f' || e.key === 'F') {
-        toggleFullScreen();
+        if (e.target.tagName !== 'SELECT') {
+          toggleFullScreen();
+        }
+      } else if (!isNaN(parseInt(e.key)) && parseInt(e.key) >= 1 && parseInt(e.key) <= 9) {
+        if (e.target.tagName !== 'SELECT') {
+          showSlide(parseInt(e.key));
+        }
       }
     });
+
+    initProgressDots();
+    showSlide(1);
   </script>
 </body>
 </html>
