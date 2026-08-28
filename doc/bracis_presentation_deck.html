@@ -310,21 +310,21 @@
     <!-- SLIDE 1: Title & Overview -->
     <div class="slide active" id="slide-1">
       <div class="slide-header">
-        <div class="slide-category">Pesquisa de Doutorado</div>
+        <div class="slide-category">BRACIS 2026 • Inteligência Artificial & Finanças Quantitativas</div>
         <h1 class="slide-title">Heterogeneous Temporal Graph Attention with Typed Edge Conditioning for Financial Co-movement Forecasting</h1>
       </div>
       <div class="slide-content">
         <div class="text-column">
-          <p style="font-size: 1.18rem; color: #e2e8f0; margin-bottom: 16px;">
+          <p style="font-size: 1.15rem; color: #e2e8f0; margin-bottom: 14px;">
             <strong>Previsão Causal de Co-movimentos e Matrizes de Covariância em Redes Financeiras Dinâmicas com TGAT Relation-Aware.</strong>
           </p>
           <ul>
-            <li><strong>Desafio:</strong> Mercados financeiros operam como fluxos de eventos assíncronos contínuos sob múltiplos tipos de relações estruturais.</li>
-            <li><strong>Inovação:</strong> Modificação cirúrgica no TGAT (<code class="highlight">GATConv(edge_dim=16)</code>) com codificação contínua <em>Time2Vec</em>, eliminando a diluição de atenção.</li>
-            <li><strong>Validação:</strong> 9 janelas <em>walk-forward</em> não-sobrepostas (2018–2025) e validação downstream em agente DRL de portfólio.</li>
+            <li><strong>Problema Científico em IA:</strong> Modelagem relacional contínua sobre fluxos assíncronos não-estacionários com múltiplos tipos de arestas (estatísticas e fundamentais).</li>
+            <li><strong>Inovação de IA (TGAT v2):</strong> Injeção direta de embeddings relacionais (<code class="highlight">GATConv(edge_dim=16)</code>) com codificação <em>Time2Vec</em>, eliminando a <strong>Diluição de Atenção</strong>.</li>
+            <li><strong>Impacto em Reinforcement Learning (DRL):</strong> Indução de viés estrutural como <em>Prior de Quebra de Simetria</em>, superando o colapso degenerado da política.</li>
           </ul>
           <div class="callout">
-            <strong>Diferencial Chave:</strong> Agregação em tempo contínuo sem memória recorrente (evita o drift do TGN) e sem discretização em snapshots mensais (supera ROLAND).
+            <strong>Diferencial Chave para a Comunidade de IA:</strong> Agregação em tempo contínuo sem memória recorrente (evita o drift do TGN) e sem discretização em snapshots mensais (supera ROLAND).
           </div>
         </div>
         <div class="img-column">
@@ -337,34 +337,37 @@
     <!-- SLIDE 2: Financial Graphs Motivation -->
     <div class="slide" id="slide-2">
       <div class="slide-header">
-        <div class="slide-category">Contexto & Motivação</div>
+    <!-- SLIDE 2: Context & Motivation -->
+    <div class="slide" id="slide-2">
+      <div class="slide-header">
+        <div class="slide-category">Contexto & Motivação Teórica</div>
         <h2 class="slide-title">Redes Financeiras Dinâmicas e Não-Estacionariedade</h2>
       </div>
       <div class="slide-content full-width">
         <div class="text-column">
           <p style="font-size: 1.12rem; margin-bottom: 14px;">
-            O gerenciamento moderno de portfólio depende da previsão da matriz de correlação <span class="highlight">\(\mathbf{P}_{t+1}\)</span> e covariância <span class="highlight">\(\mathbf{\Sigma}_{t+1}\)</span>. Métodos tradicionais enfrentam gargalos severos:
+            O gerenciamento moderno de risco e portfólio depende da previsão causal da matriz de correlação <span class="highlight">\(\mathbf{P}_{t+1}\)</span> e covariância <span class="highlight">\(\mathbf{\Sigma}_{t+1}\)</span>. Métodos tradicionais enfrentam gargalos severos:
           </p>
           <div class="grid-2col" style="margin-top: 14px;">
             <div class="card-box" style="border-left: 4px solid var(--accent-red);">
-              <h4 style="color: var(--accent-red); margin-bottom: 8px;">Gargalos de Modelos Tradicionais (EWMA / DCC-GARCH)</h4>
+              <h4 style="color: var(--accent-red); margin-bottom: 8px;">Gargalos de Modelos Estatísticos Clássicos (EWMA / DCC-GARCH)</h4>
               <ul style="font-size: 0.95rem; margin-left: 16px;">
-                <li>Ignoram topologia relacional e dependências cruzadas complexas.</li>
-                <li>Sofrem com lag temporal (atraso de reação em choques de cauda).</li>
+                <li>Ignoram a topologia relacional e dependências cruzadas não-lineares.</li>
+                <li>Sofrem com lag temporal (atraso de reação sistemático em choques de cauda).</li>
                 <li>Mal-condicionamento numérico quando \(N\) cresce relativo a \(T\).</li>
               </ul>
             </div>
             <div class="card-box" style="border-left: 4px solid var(--accent-emerald);">
-              <h4 style="color: var(--accent-emerald); margin-bottom: 8px;">A Oportunidade com Grafos Temporais Heterogêneos (HTG)</h4>
+              <h4 style="color: var(--accent-emerald); margin-bottom: 8px;">A Oportunidade com Geometric Deep Learning & Temporal Graphs (HTG)</h4>
               <ul style="font-size: 0.95rem; margin-left: 16px;">
-                <li>Modelam múltiplos canais de transmissão de risco simultaneamente.</li>
+                <li>Modelam múltiplos canais heterogêneos de transmissão de risco simultaneamente.</li>
                 <li>Fusão de arestas estatísticas dinâmicas com conhecimento fundamental estático.</li>
-                <li>Formulação como <em>Dynamic Link Prediction</em> com Huber Loss em tempo contínuo.</li>
+                <li>Formulação como <em>Dynamic Link Prediction</em> causal com Huber Loss em tempo contínuo.</li>
               </ul>
             </div>
           </div>
           <div class="callout-blue">
-            <strong>Problema Central:</strong> Como agregar informações de arestas com escalas temporais e naturezas semânticas distintas sem corromper os pesos de atenção?
+            <strong>Problema Central de IA:</strong> Como agregar informações em grafos heterogêneos dinâmicos com arestas de escalas temporais e naturezas semânticas distintas sem corromper a distribuição de atenção?
           </div>
         </div>
       </div>
@@ -373,8 +376,8 @@
     <!-- SLIDE 3: Problem & Failure Mode -->
     <div class="slide" id="slide-3">
       <div class="slide-header">
-        <div class="slide-category">Diagnóstico da Falha</div>
-        <h2 class="slide-title">Por que Modelos SOTA Homogêneos Falham em Redes Financeiras?</h2>
+        <div class="slide-category">Diagnóstico Teórico da Falha</div>
+        <h2 class="slide-title">Por que Modelos SOTA Homogêneos (TGAT) Falham em Redes Financeiras?</h2>
       </div>
       <div class="slide-content">
         <div class="text-column">
@@ -382,16 +385,16 @@
           <ul>
             <li><strong>Heterogeneidade Estrutural no Mercado:</strong>
               <ul>
-                <li><code class="highlight">CORR</code>: Correlações estatísticas altamente dinâmicas.</li>
-                <li><code class="highlight">SECT</code>: Relações estáticas de setor GICS.</li>
+                <li><code class="highlight">CORR</code>: Correlações estatísticas altamente dinâmicas e voláteis.</li>
+                <li><code class="highlight">SECT</code>: Relações estáticas densas de setor GICS.</li>
                 <li><code class="highlight">FACT</code>: Co-exposição a fatores de risco sistemáticos (Fama-French).</li>
                 <li><code class="highlight">SUPL</code>: Cadeia de suprimentos cliente-fornecedor.</li>
               </ul>
             </li>
-            <li><strong>A Falha da Diluição de Atenção:</strong> Arestas estáticas de setor dominam numericamente o grafo e <em>diluem</em> a atenção sobre links voláteis críticos de correlação.</li>
+            <li><strong>A Falha da Diluição de Atenção:</strong> Arestas estáticas de setor dominam numericamente a vizinhança local e <em>diluem</em> a massa de probabilidade do softmax sobre links dinâmicos críticos de risco.</li>
           </ul>
           <div class="callout-red">
-            <strong>Evidência de Ablação:</strong> Adicionar SECT sobre CORR+FACT no TGAT homogêneo causava queda de R² de <strong>-0.0042</strong> devido à diluição estrutural.
+            <strong>Evidência Empírica de Falha:</strong> Adicionar SECT sobre CORR+FACT no TGAT homogêneo causava queda de R² de <strong>-0.0042</strong> devido à diluição estrutural da atenção.
           </div>
         </div>
         <div class="img-column">
@@ -404,13 +407,13 @@
     <!-- SLIDE 4: Methodological Contribution -->
     <div class="slide" id="slide-4">
       <div class="slide-header">
-        <div class="slide-category">Contribuição Metodológica</div>
-        <h2 class="slide-title">A Modificação Cirúrgica no TGAT (Relation-Aware TGAT v2)</h2>
+        <div class="slide-category">Contribuição Teórica & Arquitetural em IA</div>
+        <h2 class="slide-title">Relation-Aware TGAT v2: Condicionamento de Atenção por Tipos de Aresta</h2>
       </div>
       <div class="slide-content full-width">
         <div class="text-column">
           <p style="font-size: 1.15rem; margin-bottom: 12px;">
-            Injetamos embeddings de tipo de aresta <span class="highlight" style="font-size: 1.2rem;"><strong>e</strong><sub>ij</sub> &isin; &#8477;<sup>16</sup></span> diretamente na formulação de atenção da camada <code class="highlight">GATConv(edge_dim=16)</code>:
+            Condicionamos a projeção de atenção injetando embeddings de relações heterogêneas <span class="highlight" style="font-size: 1.2rem;"><strong>e</strong><sub>ij</sub> &isin; &#8477;<sup>16</sup></span> diretamente na camada <code class="highlight">GATConv(edge_dim=16)</code>:
           </p>
           
           <!-- Pristine Vector Mathematical Equation -->
@@ -459,18 +462,18 @@
               <text x="848" y="48" fill="#cbd5e1" font-family="'Cambria Math', 'Times New Roman', serif" font-size="44">)</text>
             </svg>
             <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 8px;">
-              Atenção relacional condicionada com projeção linear de aresta <strong style="color: var(--accent-emerald);">W<sub>e</sub> e<sub>ij</sub></strong>.
+              Atenção relacional condicionada com projeção linear de aresta <strong style="color: var(--accent-emerald);">W<sub>e</sub> e<sub>ij</sub></strong> para eliminação de diluição estrutural.
             </div>
           </div>
 
           <div class="grid-2col">
             <div class="card-box" style="border-left: 4px solid var(--accent-emerald);">
               <h4 style="color: var(--accent-emerald); margin-bottom: 6px;">Vantagem sobre TGN (Recorrente)</h4>
-              <p style="font-size: 0.92rem; color: #94a3b8;">Sem memória GRU persistente por nó. Elimina a deriva de estado de longo prazo, gradientes explosivos e custo de TBPTT sequencial.</p>
+              <p style="font-size: 0.92rem; color: #94a3b8;">Sem memória GRU persistente por nó. Elimina a deriva de estado em sequências longas (\(T > 1000\)), gradientes explosivos e o custo de TBPTT.</p>
             </div>
             <div class="card-box" style="border-left: 4px solid var(--accent-blue);">
               <h4 style="color: var(--accent-blue); margin-bottom: 6px;">Vantagem sobre ROLAND (Snapshots)</h4>
-              <p style="font-size: 0.92rem; color: #94a3b8;">Processa o fluxo contínuo de eventos assíncronos (preços, balanços, decisões do FED) sobre ring buffers locais com codificação <em>Time2Vec</em>.</p>
+              <p style="font-size: 0.92rem; color: #94a3b8;">Modelagem em tempo contínuo de eventos assíncronos via <em>Time2Vec</em> e robustez contra caudas pesadas via <em>Huber Loss</em> (\(\delta=1.0\)).</p>
             </div>
           </div>
         </div>
@@ -480,7 +483,7 @@
     <!-- SLIDE 5: Universe Scaling & Density (KEY USER FOCUS) -->
     <div class="slide" id="slide-5">
       <div class="slide-header">
-        <div class="slide-category">Protocolo Experimental & Escala</div>
+        <div class="slide-category">Protocolo Experimental & Escalaridade Combinatória</div>
         <h2 class="slide-title">Escalaridade de Universo: N=18 (DRL), N=50 (Paper) e N=100 (S&P 100)</h2>
       </div>
       <div class="slide-content">
@@ -489,23 +492,23 @@
           <ul>
             <li><strong>Benchmark do Artigo (\(N=50\) Ações S&P 500):</strong>
               <ul>
-                <li><strong>1.225 pares/dia</strong> em 11 setores GICS. Foco em precisão preditiva pura e significância estatística.</li>
-                <li>Atinge <span class="highlight">R² = 0.893</span> e <span class="highlight">Spearman ρ = 0.958</span>.</li>
+                <li><strong>1.225 pares/dia</strong> em 11 setores GICS. Foco em dynamic link prediction causal e significância estatística.</li>
+                <li>Atinge <span class="highlight">R² = 0.893</span> e <span class="highlight">Spearman ρ = 0.958</span> (\(p < 0.0001\)).</li>
               </ul>
             </li>
-            <li><strong>Painel DRL Multi-Ativo (\(N=18\) Ativos):</strong>
+            <li><strong>Painel DRL Multi-Ativo (\(N=18\) Ativos, 4 Classes):</strong>
               <ul>
-                <li>Painel balanceado de 4 classes: Ações, Treasuries (TLT), Ouro (GLD), Cripto (BTC-USD). Foco em utilidade de alocação e quebra de simetria.</li>
+                <li>Ações, Treasuries (TLT), Ouro (GLD), Cripto (BTC). Foco em utilidade de alocação e quebra de simetria do espaço de ações (\(H = 2.615\)).</li>
               </ul>
             </li>
             <li><strong>Benchmark Amplo (\(N=100\) S&P 100 / \(N=104\) PORTA Pool):</strong>
               <ul>
-                <li><strong>4.950 a 5.356 pares/dia</strong>. Mantém R² = 0.865 (sparsificação por limiar \(\tau=0.3\); TMFG completo em roadmap).</li>
+                <li><strong>4.950 a 5.356 pares/dia</strong>. Mantém R² = 0.865 sob sparsificação por limiar (\(\tau=0.3\); TMFG completo em roadmap).</li>
               </ul>
             </li>
           </ul>
           <div class="callout">
-            <strong>Insight Metodológico:</strong> O grafo cresce em \(O(N^2)\). O TGAT v2 mantém alta capacidade preditiva mesmo sob densidade combinatorial extrema.
+            <strong>Insight de IA:</strong> O grafo cresce em \(O(N^2)\). O TGAT v2 mantém alta capacidade preditiva e convergência estável mesmo sob densidade combinatorial extrema.
           </div>
         </div>
         <div class="img-column">
@@ -518,17 +521,17 @@
     <!-- SLIDE 6: Predictive Benchmark Results -->
     <div class="slide" id="slide-6">
       <div class="slide-header">
-        <div class="slide-category">Validação Empírica</div>
-        <h2 class="slide-title">Resultados Preditivos Walk-Forward (50 Ativos S&P 500)</h2>
+        <div class="slide-category">Validação Empírica & Benchmarks SOTA</div>
+        <h2 class="slide-title">Desempenho Preditivo Walk-Forward (N=50 Ações S&P 500)</h2>
       </div>
       <div class="slide-content">
         <div class="text-column">
           <p>Avaliação rigorosa em 9 janelas <em>walk-forward</em> não-sobrepostas (2018–2025):</p>
           <ul style="margin-top: 10px;">
-            <li><strong>DyFO (TGAT v2):</strong> <span class="highlight-green">R² = 0.893</span> | <span class="highlight-green">Spearman ρ = 0.958</span> (MAE = 0.035, Pearson r = 0.952).</li>
-            <li><strong>DyFO (TGN):</strong> R² = 0.803 | Spearman ρ = 0.932 (deriva por memória recorrente).</li>
+            <li><strong>DyFO (TGAT v2 Relation-Aware):</strong> <span class="highlight-green">R² = 0.893</span> | <span class="highlight-green">Spearman ρ = 0.958</span> (MAE = 0.035, Pearson r = 0.952).</li>
+            <li><strong>DyFO (TGN Recorrente):</strong> R² = 0.803 | Spearman ρ = 0.932 (deriva acumulada por memória GRU).</li>
             <li><strong>GAT-Static:</strong> R² = 0.684 (0.565 em estresse) | Spearman ρ = 0.902.</li>
-            <li><strong>ROLAND:</strong> R² = 0.518 (0.390 em estresse) | Spearman ρ = 0.752 (degradação por snapshots).</li>
+            <li><strong>ROLAND (Snapshots Discretos):</strong> R² = 0.518 (0.390 em estresse) | Spearman ρ = 0.752 (perda de granularidade temporal).</li>
           </ul>
           <div class="callout">
             <strong>Significância Estatística:</strong> Teste Diebold-Mariano (HAC Newey-West) e Wilcoxon com correção Holm-Bonferroni confirmam superioridade preditiva (\(p < 0.0001\)).
@@ -578,19 +581,19 @@
     <!-- SLIDE 8: DRL Portfolio Utility -->
     <div class="slide" id="slide-8">
       <div class="slide-header">
-        <div class="slide-category">Utilidade Econômica</div>
-        <h2 class="slide-title">Validação em Gerenciamento de Portfólio (DRL Walk-Forward)</h2>
+        <div class="slide-category">Utilidade Econômica & Quebra de Simetria em DRL</div>
+        <h2 class="slide-title">Inductive Bias Relacional em Deep Reinforcement Learning (N=18)</h2>
       </div>
       <div class="slide-content">
         <div class="text-column">
           <p>Otimização de alocação em painel multi-ativo (18 ativos, 4 classes: Ações, Bonds, Ouro, Cripto):</p>
           <ul>
-            <li><strong>Retorno e Turnover:</strong> DyFO-DRL+ supera EWMA-GMVP em retorno acumulado (\(+1.72\%\) alpha, \(p=0.0312\)) com turnover 63% menor (0.025 vs 0.083).</li>
-            <li><strong>Ressalva Estatística de Risco:</strong> O ganho em Sharpe (\(+0.153\)) não atinge significância (\(p=1.00\)) e apresenta maior drawdown em cauda — evidência promissora de utilidade econômica.</li>
-            <li><strong>Quebra de Simetria do Raw-DRL:</strong> O agente sem grafo (Raw-DRL) colapsa para a alocação ingênua \(1/N\) (\(\text{entropia} = 2.890 \approx \ln 18\)); os embeddings do DyFO quebram a simetria (\(H = 2.615\)).</li>
+            <li><strong>Superação do Colapso de Entropia (Raw-DRL):</strong> Sem grafo, a política PPO colapsa na alocação uniforme ingênua \(1/N\) (\(H = 2.890 \approx \ln 18\)). O DyFO quebra essa simetria (\(H = 2.615\)), induzindo aprendizado de pesos estruturados.</li>
+            <li><strong>Retorno e Eficiência Operacional:</strong> DyFO-DRL+ supera EWMA-GMVP em retorno acumulado (\(+1.72\%\) alpha, \(p=0.0312\)) com redução de <strong>63% no turnover</strong> (0.025 vs 0.083).</li>
+            <li><strong>Rigor Estatístico:</strong> Ganho em Sharpe (\(+0.153\)) não atinge significância assintótica (\(p=1.00\)) e exibe caudas maiores — confirma utilidade econômica real com transparência metodológica.</li>
           </ul>
           <div class="callout">
-            <strong>Conclusão Honesta:</strong> A modelagem relacional impede o colapso degenerado da política e viabiliza a exploração de fronteiras de risco.
+            <strong>Insight para a Comunidade de IA:</strong> O grafo temporal atua como regularizador indutivo indispensável para impedir a degeneração de políticas em espaços de ação de alta dimensão.
           </div>
         </div>
         <div class="img-column">
@@ -603,19 +606,19 @@
     <!-- SLIDE 9: Crisis Robustness (COVID-19) -->
     <div class="slide" id="slide-9">
       <div class="slide-header">
-        <div class="slide-category">Regimes de Estresse & Robustez</div>
-        <h2 class="slide-title">Rastreamento da Decorrelação no Choque do COVID-19</h2>
+        <div class="slide-category">Regimes de Estresse & Robustez Não-Linear</div>
+        <h2 class="slide-title">Rastreamento de Decorrelação Contínua no Choque da COVID-19</h2>
       </div>
       <div class="slide-content">
         <div class="text-column">
           <p><strong>Comportamento sob Choques Extremos de Volatilidade:</strong></p>
           <ul>
             <li>Durante o crash de março de 2020, o par <strong>SPY - ^VIX</strong> sofreu uma rápida transição não-linear de correlação (de \(-0.85\) para \(-0.25\)).</li>
-            <li><strong>DyFO (TGAT v2):</strong> Rastreia a trajetória contínua da covariância sem defasagem temporal de lag.</li>
-            <li><strong>Baselines Estáticos / Lag-1:</strong> Falham por manter médias históricas defasadas ou reagir tardiamente.</li>
+            <li><strong>DyFO (TGAT v2):</strong> Rastreia a trajetória contínua da covariância sem defasagem temporal de lag nem ruído espúrio.</li>
+            <li><strong>Baselines Estáticos / Lag-1:</strong> Falham criticamente por manter médias históricas defasadas ou sofrer atraso de fase na detecção do regime.</li>
           </ul>
           <div class="callout">
-            <strong>Robustez Prática:</strong> A codificação <em>Time2Vec</em> e o Huber Loss impedem que o modelo seja contaminado por outliers pontuais.
+            <strong>Estabilidade de Gradiente:</strong> A codificação harmônica <em>Time2Vec</em> e a função de perda <em>Huber Loss</em> (\(\delta=1.0\)) impedem a explosão de gradientes por outliers pontuais de cauda gorda.
           </div>
         </div>
         <div class="img-column">
@@ -628,19 +631,19 @@
     <!-- SLIDE 10: Doctoral Triad Integration -->
     <div class="slide" id="slide-10">
       <div class="slide-header">
-        <div class="slide-category">Arquitetura de Sistemas</div>
+        <div class="slide-category">Arquitetura de Sistemas & Ontologia Semântica</div>
         <h2 class="slide-title">Integração na Tríade do Doutorado (PORTA, DyFO e ORION)</h2>
       </div>
       <div class="slide-content">
         <div class="text-column">
-          <p>O DyFO atua como o motor de inteligência relacional da tese:</p>
+          <p>O DyFO atua como o motor de percepção relacional e topológica da tese:</p>
           <ul>
-            <li><strong>Alimentação Curada (PORTA &rarr; DyFO):</strong> Consumo estritamente <em>read-only</em> dos tensores \(X, R, M, S\) (104 ativos, 2005–2026) e regimes \(\pi_t\).</li>
-            <li><strong>Ablação Estrutural (DyFO &rarr; PORTA):</strong> <code class="highlight">DyFOAdapter</code> exporta <code class="highlight">StructuralGraphSnapshot</code> causal para modelos de alocação do PORTA (RQ6/RQ6R).</li>
-            <li><strong>Percepção Multimodal (DyFO &rarr; ORION):</strong> Exportação de embeddings relacionais temporais (\(\mathbf{e}_t \in \mathbb{R}^{100}\)) para o construtor de estado do agente DRL.</li>
+            <li><strong>Alimentação Curada (PORTA &rarr; DyFO):</strong> Consumo estritamente <em>read-only</em> dos tensores multidimensionais \(X, R, M, S\) (104 ativos, 2005–2026) e regimes de mercado \(\pi_t\).</li>
+            <li><strong>Ablação Estrutural Causal (DyFO &rarr; PORTA):</strong> O <code class="highlight">DyFOAdapter</code> exporta <code class="highlight">StructuralGraphSnapshot</code> com arestas causais para modelos de alocação de risco do PORTA (RQ6/RQ6R).</li>
+            <li><strong>Percepção Relacional (DyFO &rarr; ORION):</strong> Injeção contínua de embeddings temporais (\(\mathbf{z}_t \in \mathbb{R}^{100}\)) no espaço de observação do agente multimodal DRL.</li>
           </ul>
           <div class="callout">
-            <strong>Ontologia Semântica:</strong> Padronização em formato OWL/RDF com identificadores <code class="highlight">&lt;TICKER&gt;.US</code> e predicados tipados.
+            <strong>Ontologia Semântica:</strong> Padronização formal em OWL/RDF com identificadores uniformes <code class="highlight">&lt;TICKER&gt;.US</code> e predicados relacionais tipados.
           </div>
         </div>
         <div class="img-column">
@@ -650,34 +653,34 @@
       </div>
     </div>
 
-    <!-- SLIDE 11: Conclusion & Roadmap -->
+    <!-- SLIDE 11: Conclusion & Academic Contributions -->
     <div class="slide" id="slide-11">
       <div class="slide-header">
-        <div class="slide-category">Conclusões & Próximos Passos</div>
-        <h2 class="slide-title">Conclusões e Contribuições da Pesquisa</h2>
+        <div class="slide-category">Conclusões & Contribuições para a Comunidade de IA</div>
+        <h2 class="slide-title">Síntese das Contribuições em Inteligência Artificial no BRACIS</h2>
       </div>
       <div class="slide-content full-width">
         <div class="text-column">
           <div class="grid-2col">
             <div class="card-box" style="border-left: 4px solid var(--accent-emerald);">
-              <h4 style="color: var(--accent-emerald); font-size: 1.15rem; margin-bottom: 8px;">Principais Contribuições Teóricas & Empíricas</h4>
+              <h4 style="color: var(--accent-emerald); font-size: 1.15rem; margin-bottom: 8px;">Contribuições Teóricas & Arquiteturais</h4>
               <ul style="font-size: 0.95rem; margin-left: 16px;">
-                <li><strong>Modificação Cirúrgica no TGAT:</strong> Demonstração formal e empírica de como o condicionamento de aresta elimina a diluição de atenção.</li>
-                <li><strong>Superioridade Preditiva Comprovada:</strong> \(R^2 = 0.893\), Spearman \(\rho = 0.958\), Pearson \(r = 0.952\) em 9 janelas <em>walk-forward</em>.</li>
-                <li><strong>Alpha Real em DRL:</strong> 100% de win-rate sobre EWMA-GMVP e superação do colapso ingênuo \(1/N\).</li>
+                <li><strong>Resolução da Diluição de Atenção:</strong> Condicionamento explícito \(\mathbf{W}_e \mathbf{e}_{ij} \in \mathbb{R}^{16}\) em GNNs dinâmicas, convertendo interferência destrutiva (\(-0.0042\)) em ganho sinérgico (+0.0410 \(R^2\)).</li>
+                <li><strong>Regularização Indutiva em DRL:</strong> Quebra de simetria com redução de entropia (\(H = 2.890 \to 2.615\)), superando o colapso \(1/N\) com +1.72% de alpha e 63% menor turnover.</li>
+                <li><strong>Superioridade sobre SOTA Dinâmico:</strong> Desempenho superior a TGN e ROLAND (\(R^2 = 0.893\), \(r = 0.952\)) com significância Diebold-Mariano (\(p < 0.0001\)).</li>
               </ul>
             </div>
             <div class="card-box" style="border-left: 4px solid var(--accent-blue);">
-              <h4 style="color: var(--accent-blue); font-size: 1.15rem; margin-bottom: 8px;">Transparência Metodológica & Roadmap</h4>
+              <h4 style="color: var(--accent-blue); font-size: 1.15rem; margin-bottom: 8px;">Rigor Metodológico & Engenharia de Sistemas</h4>
               <ul style="font-size: 0.95rem; margin-left: 16px;">
-                <li><strong>Causalidade Estrita:</strong> Adoção de rolling Pearson (\([t-W, t]\)) para mitigar vazamento de \(Q\) incondicional em DCC full-sample.</li>
-                <li><strong>Journal de Finanças / IA:</strong> Extensão da tríade completa (PORTA + DyFO + ORION) em dados intraday e sparsificação TMFG.</li>
-                <li><strong>Código Aberto & Reprodutibilidade:</strong> Repositório modular, documentado e com testes de causalidade 100% verdes.</li>
+                <li><strong>Causalidade Estrita em Streaming:</strong> Ground truth causal sem look-ahead bias, estabilidade de gradientes por Huber Loss e codificação temporal contínua Time2Vec.</li>
+                <li><strong>Tríade Doutoral Integrada:</strong> Interoperabilidade ontológica formal (OWL/RDF) entre curadoria de dados (PORTA), inteligência relacional (DyFO) e agentes DRL (ORION).</li>
+                <li><strong>Ciência Aberta & Reprodutibilidade:</strong> Pipeline 100% reproduzível, testes unitários rigorosos e código documentado para a comunidade de IA.</li>
               </ul>
             </div>
           </div>
           <div class="callout" style="margin-top: 18px; text-align: center;">
-            <strong>Obrigado!</strong> Contato & Código: <em>Laboratório de Inteligência Artificial e Finanças Quantitativas</em>.
+            <strong>BRACIS 2026:</strong> O DyFO estabelece novos fundamentos para Dynamic Graph Neural Networks em fluxos temporais contínuos e sistemas complexos não-estacionários.
           </div>
         </div>
       </div>
