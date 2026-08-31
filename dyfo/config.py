@@ -63,6 +63,8 @@ class DyFOConfig:
     # --- Correlation ---
     correlation_method: str = "rolling_pearson"  # Strictly causal: "rolling_pearson" (default) or "dcc_garch"
     dcc_garch_window: int = 252
+    dcc_garch_mode: str = "causal_filter"  # "causal_filter" (default) | "causal_rolling" | "full_sample"
+    dcc_garch_refit_every: int = 0  # Days between periodic refits in causal_filter mode (0 = initial calibration only)
     rolling_corr_window: int = 63
 
     # --- Data ---

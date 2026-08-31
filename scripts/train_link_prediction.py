@@ -167,10 +167,16 @@ def prepare_data(
     # Correlation method: DCC-GARCH (Engle 2002) or rolling Pearson
     use_dcc = config.correlation_method == "dcc_garch"
     if use_dcc:
-        logger.info("Computing DCC-GARCH correlations...")
-        corr_series_all, corr_pairs_all = compute_dcc_garch_correlations(
-            prices, window=config.dcc_garch_window, threshold=0.0,
+        logger.info("Computing DCC-GARCH correlations (causal)...")
+        corr_res = compute_dcc_garch_correlations(
+            prices,
+            window=config.dcc_garch_window,
+            threshold=0.0,
+            mode=getattr(config, "dcc_garch_mode", "causal_filter"),
+            refit_every=getattr(config, "dcc_garch_refit_every", 0),
         )
+        corr_series_all = corr_res[0]
+        corr_pairs_all = corr_res[1]
         corr_series = corr_series_all.copy()
         for col in corr_series.columns:
             mask = corr_series[col].abs() < config.corr_sparsify_threshold
