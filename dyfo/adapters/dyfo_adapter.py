@@ -226,8 +226,51 @@ class DyFOAdapter:
         self._cached_graphs[as_of_date] = snapshot
         return snapshot
 
+    def enroll_inductive_ticker(
+        self,
+        ticker: str,
+        sector: str | None = None,
+        initial_features: np.ndarray | None = None,
+    ) -> int:
+        """Enroll an out-of-universe asset dynamically (inductive inference).
+
+        Allows registering new tickers introduced during evaluation/deployment
+        without re-training the entire neural backbone.
+
+        Parameters
+        ----------
+        ticker : str
+            Symbol (e.g. 'UBER' or 'UBER.US').
+        sector : str, optional
+            GICS Sector name (e.g. 'Industrials').
+        initial_features : np.ndarray, optional
+            Precomputed (node_feature_dim,) feature vector.
+
+        Returns
+        -------
+        int : Newly assigned asset node index.
+        """
+        norm_tk = ticker.strip().upper().replace(".US", "")
+        ent_id = _to_us_ticker(norm_tk)
+        if norm_tk in self.ticker_to_idx:
+            return self.ticker_to_idx[norm_tk]
+
+        new_idx = len(self.tickers)
+        self.tickers.append(norm_tk)
+        self.entity_ids.append(ent_id)
+        self.ticker_to_idx[norm_tk] = new_idx
+        self.entity_to_idx[ent_id] = new_idx
+        self.num_nodes = len(self.tickers)
+
+        # Invalidate internal cache
+        self._cached_graphs.clear()
+        self._cached_embeddings.clear()
+        return new_idx
+
     def get_covariance_matrix(self, as_of_date: Union[datetime.date, str]) -> np.ndarray:
         """Compute the causal covariance matrix Sigma_t (N, N) as of as_of_date."""
+        from dyfo.core.link_prediction import project_to_spd_correlation
+
         snapshot = self.export_structural_graph(as_of_date)
         
         # Build correlation matrix from CORR edges
@@ -248,10 +291,9 @@ class DyFOAdapter:
                 valid_mask = (emp_vols > 0.01) & ~np.isnan(emp_vols)
                 vols[valid_mask] = emp_vols[valid_mask]
 
-        cov = np.diag(vols) @ corr_matrix @ np.diag(vols)
-        
-        # Regularization (small ridge)
-        cov += np.eye(self.num_nodes, dtype=np.float32) * 1e-4
+        # Enforce strict positive definiteness on correlation
+        corr_spd = project_to_spd_correlation(corr_matrix, epsilon=1e-4)
+        cov = np.diag(vols) @ corr_spd @ np.diag(vols)
         return cov
 
     def predict(
@@ -263,3 +305,4 @@ class DyFOAdapter:
         snapshot = self.export_structural_graph(as_of_date)
         cov = self.get_covariance_matrix(as_of_date)
         return snapshot.node_embeddings, cov
+
