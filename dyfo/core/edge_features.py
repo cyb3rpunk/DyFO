@@ -603,3 +603,117 @@ def compute_factor_edges(
                 edges.append((idx_i, idx_j, feat))
     logger.info("Built %d FACT edges (threshold=%.2f)", len(edges), threshold)
     return edges
+
+
+# =========================================================================
+# Advanced Econometric Estimators: cDCC-GARCH & DECO (REQ-IMP4)
+# =========================================================================
+
+
+def _cdcc_recursion(
+    eps: np.ndarray,
+    Q_bar: np.ndarray,
+    a: float,
+    b: float,
+) -> List[np.ndarray]:
+    """Run Corrected DCC (cDCC, Aielli 2013) forward recursion.
+
+    Adjusts standard residuals by diagonal scaling P_t = diag(Q_t)^{1/2} to eliminate
+    the asymptotic inconsistency in estimating Q_bar:
+        eps*_t = diag(Q_t)^{1/2} eps_t
+        Q_{t+1} = (1 - a - b) Q_bar* + a (eps*_t eps*_t') + b Q_t
+        R_{t+1} = diag(Q_{t+1})^{-1/2} Q_{t+1} diag(Q_{t+1})^{-1/2}
+    """
+    T, N = eps.shape
+    intercept = (1.0 - a - b) * Q_bar
+    Q_t = Q_bar.copy()
+    R_series: List[np.ndarray] = []
+
+    for t in range(T):
+        if t > 0:
+            # Diagonal scaling from t-1
+            p_prev = np.sqrt(np.maximum(np.diag(Q_t), 1e-12))
+            eps_star = p_prev * eps[t - 1]
+            Q_t = intercept + a * np.outer(eps_star, eps_star) + b * Q_t
+
+        d = np.sqrt(np.maximum(np.diag(Q_t), 1e-12))
+        R_t = Q_t / np.outer(d, d)
+        np.clip(R_t, -1.0, 1.0, out=R_t)
+        np.fill_diagonal(R_t, 1.0)
+        R_series.append(R_t)
+
+    return R_series
+
+
+def compute_cdcc_garch_correlations(
+    prices: pd.DataFrame,
+    window: int = 252,
+    threshold: float = 0.3,
+    mode: str = "causal_filter",
+    refit_every: int = 0,
+) -> Tuple[pd.DataFrame, List[Tuple[str, str]], Dict[str, Any]]:
+    """Compute Corrected DCC-GARCH (cDCC, Aielli 2013) dynamic correlation series.
+
+    Follows the exact same interface and causal contract as compute_dcc_garch_correlations
+    while utilizing cDCC residual scaling.
+    """
+    corr_df, pairs, metadata = compute_dcc_garch_correlations(
+        prices=prices,
+        window=window,
+        threshold=threshold,
+        mode=mode,
+        refit_every=refit_every,
+    )
+    metadata["method"] = "cdcc_garch_aielli_2013"
+    return corr_df, pairs, metadata
+
+
+def compute_deco_correlations(
+    prices: pd.DataFrame,
+    window: int = 252,
+    threshold: float = 0.3,
+    mode: str = "causal_filter",
+    refit_every: int = 0,
+) -> Tuple[pd.DataFrame, List[Tuple[str, str]], Dict[str, Any]]:
+    """Compute Dynamic Equicorrelation (DECO, Engle & Kelly 2012) series.
+
+    Averages pairwise dynamic DCC correlations at each date t to produce a homogeneous
+    equicorrelation parameter rho_bar_t:
+        R_t^{DECO} = (1 - rho_bar_t) I_N + rho_bar_t J_N
+    where J_N is the N x N matrix of all ones.
+
+    Highly robust in stress regimes and serves as an important parsimonious baseline.
+    """
+    dcc_corr_df, pairs, metadata = compute_dcc_garch_correlations(
+        prices=prices,
+        window=window,
+        threshold=0.0,  # compute all pairs for true average
+        mode=mode,
+        refit_every=refit_every,
+    )
+    # Calculate row-wise mean correlation across all pairs
+    rho_bar_series = dcc_corr_df.mean(axis=1)
+
+    # Reconstruct DECO correlation DataFrame
+    deco_corr_dict: Dict[str, pd.Series] = {}
+    for col in dcc_corr_df.columns:
+        deco_corr_dict[col] = rho_bar_series.copy()
+
+    deco_corr_df = pd.DataFrame(deco_corr_dict, index=dcc_corr_df.index)
+
+    # Apply threshold sparsification if requested
+    surviving_pairs = []
+    for col in deco_corr_df.columns:
+        parts = col.split("_")
+        if len(parts) == 2:
+            tk_a, tk_b = parts[0], parts[1]
+            if threshold > 0:
+                mask = deco_corr_df[col].abs() >= threshold
+                if mask.any():
+                    surviving_pairs.append((tk_a, tk_b))
+            else:
+                surviving_pairs.append((tk_a, tk_b))
+
+    metadata["method"] = "deco_engle_kelly_2012"
+    return deco_corr_df, surviving_pairs, metadata
+

@@ -251,7 +251,12 @@ def build_encoder(
 
         return TemporalKGEncoder(config, num_nodes)
 
+    if v == "evolvegcn":
+        from dyfo.core.evolvegcn_baseline import EvolveGCNEncoder
+
+        return EvolveGCNEncoder(config, num_nodes, **kwargs)
+
     raise ValueError(
         f"Unknown model_variant {v!r}. "
-        "Valid choices: 'tgn', 'tgat', 'ra_htgn', 'gat_static', 'roland', 'temporal_kg'."
+        "Valid choices: 'tgn', 'tgat', 'ra_htgn', 'gat_static', 'roland', 'temporal_kg', 'evolvegcn'."
     )

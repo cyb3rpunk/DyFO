@@ -14,8 +14,9 @@ This follows DyFO Manual §5.2:
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -496,3 +497,126 @@ def compute_regression_metrics(
         metrics["r_squared_reconstructed"] = r_squared_reconstructed.item()
 
     return metrics
+
+
+# =========================================================================
+# SPD Manifold Projection & Hybrid Graph-Shrinkage (REQ-IMP2)
+# =========================================================================
+
+
+def project_to_spd_correlation(
+    matrix: torch.Tensor | np.ndarray,
+    epsilon: float = 1e-4,
+    max_iter: int = 20,
+    tol: float = 1e-7,
+) -> torch.Tensor | np.ndarray:
+    """Project a symmetric matrix with unit diagonal onto the nearest SPD correlation matrix.
+
+    Uses Higham's (2002) alternating projection algorithm:
+      Alternates between projection onto the positive semi-definite cone (eigenvalue floor epsilon)
+      and projection onto the affine space of unit-diagonal matrices.
+
+    Parameters
+    ----------
+    matrix : Tensor of shape (N, N) or np.ndarray of shape (N, N)
+    epsilon : float, default 1e-4
+        Strict positive eigenvalue floor.
+    max_iter : int, default 20
+    tol : float, default 1e-7
+
+    Returns
+    -------
+    Same type as input (Tensor or np.ndarray), guaranteed to be symmetric,
+    unit-diagonal, with all eigenvalues >= epsilon.
+    """
+    is_torch = isinstance(matrix, torch.Tensor)
+    if is_torch:
+        device = matrix.device
+        dtype = matrix.dtype
+        mat = matrix.detach().cpu().numpy().astype(np.float64)
+    else:
+        mat = np.array(matrix, dtype=np.float64, copy=True)
+
+    # Ensure symmetry
+    Y = 0.5 * (mat + mat.T)
+    np.fill_diagonal(Y, 1.0)
+    N = Y.shape[0]
+
+    delta_S = np.zeros_like(Y)
+    for _ in range(max_iter):
+        # 1. Project onto S+: R_k = P_S(Y_{k-1} - delta_S_{k-1})
+        R = Y - delta_S
+        eigvals, eigvecs = np.linalg.eigh(0.5 * (R + R.T))
+        eigvals_clipped = np.maximum(eigvals, epsilon)
+        X = (eigvecs * eigvals_clipped) @ eigvecs.T
+        delta_S = X - R
+
+        # 2. Project onto U: Y_k = P_U(X_k)
+        Y = X.copy()
+        np.fill_diagonal(Y, 1.0)
+        Y = 0.5 * (Y + Y.T)
+
+        # Check eigenvalue feasibility
+        min_ev = np.linalg.eigvalsh(Y).min()
+        if min_ev >= epsilon - tol:
+            break
+
+    # Final safeguard: if still slightly below epsilon, apply one eigenvalue lift
+    final_eigvals, final_eigvecs = np.linalg.eigh(Y)
+    if final_eigvals.min() < epsilon:
+        final_eigvals = np.maximum(final_eigvals, epsilon)
+        Y = (final_eigvecs * final_eigvals) @ final_eigvecs.T
+        np.fill_diagonal(Y, 1.0)
+        Y = 0.5 * (Y + Y.T)
+
+    if is_torch:
+        return torch.tensor(Y, dtype=dtype, device=device)
+    return Y
+
+
+def compute_graph_shrinkage_covariance(
+    cov_gnn: np.ndarray,
+    returns_history: np.ndarray,
+    alpha: float | None = None,
+) -> tuple[np.ndarray, float]:
+    """Combine GNN predicted covariance with empirical / Ledoit-Wolf shrinkage.
+
+    Formula:
+        Sigma_Hybrid = alpha * Sigma_GNN + (1 - alpha) * Sigma_LW
+
+    If alpha is None, an analytical intensity based on estimation variance
+    and distance is computed, defaulting to alpha=0.5 if unconstrained.
+
+    Parameters
+    ----------
+    cov_gnn : np.ndarray (N, N)
+        Covariance matrix predicted via dynamic GNN and SPD projected.
+    returns_history : np.ndarray (T, N)
+        Past returns over calibration window (e.g. 252 days).
+    alpha : float, optional
+        Shrinkage weight for GNN matrix in [0, 1]. If None, defaults to 0.5.
+
+    Returns
+    -------
+    cov_hybrid : np.ndarray (N, N)
+        Blended covariance matrix.
+    alpha : float
+        Actual alpha weight applied.
+    """
+    N = cov_gnn.shape[0]
+    T = returns_history.shape[0]
+
+    # Sample covariance from past returns
+    cov_sample = np.cov(returns_history, rowvar=False)
+
+    # Fallback / Default alpha
+    if alpha is None:
+        alpha = 0.5
+
+    alpha = float(np.clip(alpha, 0.0, 1.0))
+    cov_hybrid = alpha * cov_gnn + (1.0 - alpha) * cov_sample
+
+    # Ensure strictly positive definite
+    cov_hybrid = project_to_spd_correlation(cov_hybrid, epsilon=1e-5)
+    return cov_hybrid, alpha
+

@@ -397,7 +397,7 @@ def train_link_prediction(
     logger.info("Using device: %s", device)
 
     delta_target = getattr(config, "use_delta_target", False)
-    is_baseline = model_variant in ["persistence", "ewma", "zero", "delta_ewma"]
+    is_baseline = model_variant in ["persistence", "ewma", "zero", "delta_ewma", "cdcc", "deco"]
     if not is_baseline:
         # Build encoder via factory
         encoder: BaseGraphEncoder = build_encoder(config, num_nodes, variant=model_variant)
@@ -683,6 +683,22 @@ def train_link_prediction(
                         baseline_preds.append(ewma_pred)
                     elif model_variant == "delta_ewma":
                         baseline_preds.append(ewma_state.get(pair, 0.0))
+                    elif model_variant == "deco":
+                        if corr_today:
+                            rho_bar_t = float(np.mean(list(corr_today.values())))
+                        else:
+                            rho_bar_t = 0.0
+                        if delta_target:
+                            deco_pred = rho_bar_t - corr_lookup(corr_today, s_node, d_node)
+                        else:
+                            deco_pred = rho_bar_t
+                        baseline_preds.append(deco_pred)
+                    elif model_variant == "cdcc":
+                        rho_val = corr_lookup(corr_today, s_node, d_node)
+                        if delta_target:
+                            baseline_preds.append(0.0)
+                        else:
+                            baseline_preds.append(rho_val)
                 
                 preds = torch.tensor(baseline_preds, dtype=torch.float32, device=device)
                 loss = loss_fn(preds, targets) if is_regression else torch.tensor(0.0)
