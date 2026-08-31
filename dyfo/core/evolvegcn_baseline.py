@@ -83,7 +83,7 @@ class EvolveGCNLayer(nn.Module):
             x_in = h_prev  # autonomous evolution (EvolveGCN-O)
 
         new_h = self.weight_gru(x_in, h_prev)
-        self.current_weight = new_h.detach()
+        self.current_weight = new_h  # Keep graph alive for backprop through time
 
     def forward(self, x: torch.Tensor, norm_adj: torch.Tensor) -> torch.Tensor:
         """Apply GCN layer: norm_adj @ x @ W."""
@@ -122,6 +122,7 @@ class EvolveGCNEncoder(BaseGraphEncoder):
         self.layer1 = EvolveGCNLayer(hidden_dim, hidden_dim, variant=variant)
         self.layer2 = EvolveGCNLayer(hidden_dim, self.embedding_dim, variant=variant)
         self.dropout = nn.Dropout(0.1)
+        self._current_edge_index: Optional[torch.Tensor] = None
 
         self.reset_state()
 
@@ -129,6 +130,7 @@ class EvolveGCNEncoder(BaseGraphEncoder):
         """Reset internal weights of all evolving layers."""
         self.layer1.reset_state()
         self.layer2.reset_state()
+        self._current_edge_index = None
 
     def advance_day(
         self,
@@ -140,6 +142,26 @@ class EvolveGCNEncoder(BaseGraphEncoder):
         current_time: float,
     ) -> None:
         """Process one trading day and evolve GCN weights."""
+        device = node_features.device if node_features is not None else next(self.parameters()).device
+        
+        # Build dynamic adjacency including active correlation events
+        corr_srcs = []
+        corr_tgts = []
+        for ev in events:
+            ev_type_val = ev.event_type.value if hasattr(ev.event_type, "value") else str(ev.event_type)
+            if ev_type_val == "CORRELATION_UPDATE":
+                corr_srcs.append(ev.source_node)
+                corr_tgts.append(ev.target_node)
+        
+        if corr_srcs:
+            dyn_edges = torch.tensor([corr_srcs + corr_tgts, corr_tgts + corr_srcs], dtype=torch.long, device=device)
+            if edge_index is not None and edge_index.numel() > 0:
+                self._current_edge_index = torch.cat([edge_index.to(device), dyn_edges], dim=1)
+            else:
+                self._current_edge_index = dyn_edges
+        else:
+            self._current_edge_index = edge_index.to(device) if edge_index is not None else None
+
         summary = None
         if self.variant == "EvolveGCN-H" and node_features is not None:
             # Summary vector is mean over node features
@@ -159,7 +181,8 @@ class EvolveGCNEncoder(BaseGraphEncoder):
     ) -> torch.Tensor:
         """Compute (num_nodes, embedding_dim) embeddings for today."""
         device = node_features.device if node_features is not None else next(self.parameters()).device
-        norm_adj = _normalize_adj(edge_index, self.num_nodes, device)
+        active_edge_index = self._current_edge_index if self._current_edge_index is not None else edge_index
+        norm_adj = _normalize_adj(active_edge_index, self.num_nodes, device)
 
         if node_features is None:
             x = torch.eye(self.num_nodes, self.hidden_dim, device=device)
@@ -172,8 +195,9 @@ class EvolveGCNEncoder(BaseGraphEncoder):
         return h2
 
     def detach_state(self) -> None:
-        """Detach live weight buffers."""
+        """Detach live weight buffers (TBPTT)."""
         if self.layer1.current_weight is not None:
             self.layer1.current_weight = self.layer1.current_weight.detach()
         if self.layer2.current_weight is not None:
             self.layer2.current_weight = self.layer2.current_weight.detach()
+

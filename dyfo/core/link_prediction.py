@@ -448,7 +448,7 @@ def compute_regression_metrics(
     # Rank correlation (Spearman approximation via Pearson on ranks)
     with torch.no_grad():
         n = len(predictions)
-        if n > 2:
+        if n > 2 and predictions.std() > 1e-6 and targets.std() > 1e-6:
             pred_ranks = predictions.argsort().argsort().float()
             target_ranks = targets.argsort().argsort().float()
             rank_corr_num = ((pred_ranks - pred_ranks.mean()) * (target_ranks - target_ranks.mean())).sum()
