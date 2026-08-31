@@ -719,6 +719,7 @@ def run_bootstrap_eval_temporal_kg_rev3(
     on_progress: Optional[callable] = None,
     seeds: Optional[List[int]] = None,
     delta_target: bool = False,
+    correlation_method: str = "dcc_garch",
 ) -> dict:
     # Create output directory early so the log file lives alongside results
     ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
@@ -741,12 +742,16 @@ def run_bootstrap_eval_temporal_kg_rev3(
     logger.info("Bootstrap Eval Temporal KG Rev3")
     logger.info("  variants   : %s", variants)
     logger.info("  n_tickers  : %d", n_tickers)
+    logger.info("  corr_method: %s", correlation_method)
     if seeds is None:
         seeds = DEFAULT_SEEDS
-    logger.info("  ablation   : %s", ablation or "disabled")
-    logger.info("  seeds      : %s (%d total)", seeds, len(seeds))
-    logger.info("  step_days  : %d | test_days=%d | overlap=%s",
-                step_days, test_days, "YES" if step_days < test_days else "NO")
+
+    logger.info("  seeds      : %s", seeds)
+    logger.info("  epochs     : %d", epochs)
+    logger.info("  windows    : max=%s", max_windows)
+    logger.info("  bootstrap  : B=%d block=%d", n_bootstrap, block_size)
+    if ablation:
+        logger.info("  ablation   : mode=%s variant=%s", ablation, ablation_variant)
     logger.info("=" * 60)
 
     if step_days < test_days:
@@ -766,7 +771,11 @@ def run_bootstrap_eval_temporal_kg_rev3(
             n_tickers,
         )
 
-    config = DyFOConfig(model_variant=variants[0] if variants else "tgn", use_delta_target=delta_target)
+    config = DyFOConfig(
+        model_variant=variants[0] if variants else "tgn",
+        correlation_method=correlation_method,
+        use_delta_target=delta_target,
+    )
     data_config = DataConfig(
         tickers=tickers, benchmark_ticker="SPY", start_date=start, end_date=end
     )
@@ -976,6 +985,12 @@ def main():
         default=False,
         help="Use Delta rho = rho_{t+1} - rho_t as target.",
     )
+    parser.add_argument(
+        "--correlation_method",
+        choices=["dcc_garch", "rolling_pearson"],
+        default="dcc_garch",
+        help="Correlation estimation method (default: dcc_garch).",
+    )
     args = parser.parse_args()
 
     run_bootstrap_eval_temporal_kg_rev3(
@@ -995,6 +1010,7 @@ def main():
         max_windows=args.max_windows,
         seeds=args.seeds,
         delta_target=args.delta_target,
+        correlation_method=args.correlation_method,
     )
 
 
