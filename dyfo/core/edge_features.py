@@ -179,6 +179,56 @@ def _dcc_recursion(
     return R_series
 
 
+def _dcc_recursion_adaptive(
+    eps: np.ndarray,
+    Q_bar: np.ndarray,
+    a: float,
+    b: float,
+    window: int = 252,
+    refit_every: int = 0,
+) -> List[np.ndarray]:
+    """Run DCC(1,1) forward recursion with strictly causal periodic refits.
+
+    At each refit milestone t_k >= window, (a, b, Q_bar) are re-estimated using
+    strictly the trailing historical slice eps[t_k - window : t_k].
+    Zero data from >= t_k is ever accessed.
+    """
+    if refit_every <= 0:
+        return _dcc_recursion(eps, Q_bar, a, b)
+
+    T, N = eps.shape
+    curr_a, curr_b = a, b
+    curr_Q_bar = Q_bar.copy()
+    intercept = (1.0 - curr_a - curr_b) * curr_Q_bar
+    Q_t = curr_Q_bar.copy()
+    R_series: List[np.ndarray] = []
+
+    for t in range(T):
+        if t > 0:
+            # Check if t is a periodic refit boundary
+            if t >= window and (t - window) % refit_every == 0:
+                trailing_eps = eps[max(0, t - window) : t]
+                new_Q_bar = np.corrcoef(trailing_eps.T)
+                if not np.isnan(new_Q_bar).any():
+                    curr_Q_bar = new_Q_bar
+                try:
+                    new_a, new_b = _estimate_dcc_params(trailing_eps, curr_Q_bar)
+                    curr_a, curr_b = new_a, new_b
+                except Exception:
+                    pass  # keep existing parameters if optimization fails
+                intercept = (1.0 - curr_a - curr_b) * curr_Q_bar
+
+            Q_t = intercept + curr_a * np.outer(eps[t - 1], eps[t - 1]) + curr_b * Q_t
+
+        d = np.sqrt(np.maximum(np.diag(Q_t), 1e-12))
+        R_t = Q_t / np.outer(d, d)
+        np.clip(R_t, -1.0, 1.0, out=R_t)
+        np.fill_diagonal(R_t, 1.0)
+        R_series.append(R_t)
+
+    return R_series
+
+
 import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -200,8 +250,8 @@ def compute_dcc_garch_correlations(
 
     Causality contract (REQ-D3):
       In "causal_filter" mode, parameter estimation (GARCH + DCC) is performed
-      strictly on the initial calibration window of length `window` (or history <= t).
-      The recursion forward for t >= window evaluates without any future look-ahead.
+      strictly on historical data <= t. When refit_every > 0, parameters are
+      periodically recalibrated using trailing historical slices without future look-ahead.
       Removing observations > t yields the exact same correlation at date t.
 
     Parameters
@@ -235,6 +285,7 @@ def compute_dcc_garch_correlations(
         metadata = {
             "mode": "rolling_pearson_fallback",
             "window": window,
+            "refit_every": refit_every,
             "threshold": threshold,
             "reason": "arch_not_installed",
         }
@@ -250,6 +301,7 @@ def compute_dcc_garch_correlations(
         metadata = {
             "mode": "rolling_pearson_fallback",
             "window": window,
+            "refit_every": refit_every,
             "threshold": threshold,
             "reason": "insufficient_data",
         }
@@ -258,7 +310,7 @@ def compute_dcc_garch_correlations(
     calib_len = min(window, T_total)
 
     # -- Step 1: GARCH(1,1) per asset -----------------------------------
-    logger.info("DCC-GARCH Step 1: Fitting GARCH(1,1) for %d assets (mode=%s, calib_window=%d)...", len(tickers), mode, calib_len)
+    logger.info("DCC-GARCH Step 1: Fitting GARCH(1,1) for %d assets (mode=%s, calib_window=%d, refit_every=%d)...", len(tickers), mode, calib_len, refit_every)
     std_resids: Dict[str, pd.Series] = {}
     garch_failed = 0
     garch_params: Dict[str, dict] = {}
@@ -288,14 +340,27 @@ def compute_dcc_garch_correlations(
             if mode == "full_sample":
                 std_resids[ticker] = res.std_resid
             else:
-                # Forward causal recursion using fixed calibration parameters
+                # Forward causal recursion using fixed or periodically refitted parameters
                 T_s = len(series)
                 r_vals = series.values
                 sigma2 = np.empty(T_s)
                 init_var = float(np.var(fit_slice.values))
                 sigma2[0] = init_var if init_var > 1e-8 else float(omega / max(1.0 - alpha - beta, 1e-4))
+                
+                curr_omega, curr_alpha, curr_beta = omega, alpha, beta
                 for t in range(1, T_s):
-                    sigma2[t] = omega + alpha * (r_vals[t - 1] ** 2) + beta * sigma2[t - 1]
+                    if refit_every > 0 and t >= calib_len and (t - calib_len) % refit_every == 0:
+                        try:
+                            refit_slice = series.iloc[max(0, t - calib_len) : t]
+                            m_refit = arch_model(refit_slice, vol="Garch", p=1, q=1, mean="Zero", rescale=False)
+                            res_refit = m_refit.fit(disp="off", show_warning=False)
+                            curr_omega = float(res_refit.params.get("omega", curr_omega))
+                            curr_alpha = float(res_refit.params.get("alpha[1]", curr_alpha))
+                            curr_beta = float(res_refit.params.get("beta[1]", curr_beta))
+                        except Exception:
+                            pass
+
+                    sigma2[t] = curr_omega + curr_alpha * (r_vals[t - 1] ** 2) + curr_beta * sigma2[t - 1]
                 
                 eps_vals = r_vals / np.sqrt(np.maximum(sigma2, 1e-12))
                 std_resids[ticker] = pd.Series(eps_vals, index=series.index)
@@ -314,6 +379,7 @@ def compute_dcc_garch_correlations(
         metadata = {
             "mode": "rolling_pearson_fallback",
             "window": 63,
+            "refit_every": refit_every,
             "threshold": threshold,
             "reason": f"garch_failed_on_{garch_failed}_assets",
         }
@@ -326,6 +392,7 @@ def compute_dcc_garch_correlations(
         metadata = {
             "mode": "rolling_pearson_fallback",
             "window": 63,
+            "refit_every": refit_every,
             "threshold": threshold,
             "reason": "fewer_than_2_valid_tickers",
         }
@@ -338,6 +405,7 @@ def compute_dcc_garch_correlations(
         metadata = {
             "mode": "rolling_pearson_fallback",
             "window": 63,
+            "refit_every": refit_every,
             "threshold": threshold,
             "reason": "insufficient_aligned_residuals",
         }
@@ -360,10 +428,13 @@ def compute_dcc_garch_correlations(
         logger.warning("DCC estimation failed (%s); using defaults a=0.01, b=0.95", exc)
         a, b = 0.01, 0.95
 
-    logger.info("DCC params: a=%.6f, b=%.6f (persistence a+b=%.4f, mode=%s)", a, b, a + b, mode)
+    logger.info("DCC params: a=%.6f, b=%.6f (persistence a+b=%.4f, mode=%s, refit_every=%d)", a, b, a + b, mode, refit_every)
 
     # -- Step 3: Forward recursion -> R_t ----------------------------------
-    R_series = _dcc_recursion(eps_all, Q_bar, a, b)
+    if mode == "full_sample" or refit_every <= 0:
+        R_series = _dcc_recursion(eps_all, Q_bar, a, b)
+    else:
+        R_series = _dcc_recursion_adaptive(eps_all, Q_bar, a, b, window=calib_len, refit_every=refit_every)
 
     # -- Step 4: Extract pairwise correlations ----------------------------
     pairs: List[Tuple[str, str]] = list(combinations(tickers, 2))
@@ -399,8 +470,8 @@ def compute_dcc_garch_correlations(
     }
 
     logger.info(
-        "DCC-GARCH correlations: %d/%d pairs survive (|rho| >= %.2f), T=%d dates (causal mode=%s)",
-        len(surviving_pairs), len(pairs), threshold, len(corr_df), mode,
+        "DCC-GARCH correlations: %d/%d pairs survive (|rho| >= %.2f), T=%d dates (causal mode=%s, refit_every=%d)",
+        len(surviving_pairs), len(pairs), threshold, len(corr_df), mode, refit_every,
     )
     return corr_df, surviving_pairs, metadata
 

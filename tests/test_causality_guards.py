@@ -186,6 +186,43 @@ def test_dcc_correlations_are_causal():
     )
 
 
+def test_dcc_periodic_refit_is_causal():
+    """REQ-D3.3: Periodic DCC recalibration (refit_every > 0) must be strictly causal."""
+    from dyfo.core.edge_features import compute_dcc_garch_correlations
+
+    np.random.seed(42)
+    dates = pd.date_range("2020-01-01", periods=300, freq="B")
+    ret_a = np.random.normal(0, 0.01, size=300)
+    ret_b = 0.5 * ret_a + np.random.normal(0, 0.01, size=300)
+    prices = pd.DataFrame(
+        {
+            "AAPL": 100 * np.exp(np.cumsum(ret_a)),
+            "MSFT": 100 * np.exp(np.cumsum(ret_b)),
+        },
+        index=dates,
+    )
+
+    t_eval = dates[250]
+    prices_full = prices.copy()
+    prices_truncated = prices.loc[:t_eval].copy()
+
+    res_full = compute_dcc_garch_correlations(prices_full, window=100, threshold=0.0, refit_every=50)
+    res_trunc = compute_dcc_garch_correlations(prices_truncated, window=100, threshold=0.0, refit_every=50)
+
+    corr_full = res_full[0] if isinstance(res_full, tuple) else res_full
+    corr_trunc = res_trunc[0] if isinstance(res_trunc, tuple) else res_trunc
+
+    rho_full = corr_full.loc[t_eval, "AAPL_MSFT"]
+    rho_trunc = corr_trunc.loc[t_eval, "AAPL_MSFT"]
+
+    np.testing.assert_allclose(
+        rho_full,
+        rho_trunc,
+        atol=1e-5,
+        err_msg="Periodic refit DCC correlation at t changed when future data was added (look-ahead leak)",
+    )
+
+
 def test_dcc_records_estimation_window():
     """REQ-D3.2: DCC estimation metadata must record mode, window, and execution details."""
     from dyfo.core.edge_features import compute_dcc_garch_correlations
@@ -200,13 +237,14 @@ def test_dcc_records_estimation_window():
         index=dates,
     )
 
-    result = compute_dcc_garch_correlations(prices, window=60, threshold=0.0)
+    result = compute_dcc_garch_correlations(prices, window=60, threshold=0.0, refit_every=30)
     assert isinstance(result, tuple) and len(result) == 3, "Expected (corr_df, pairs, metadata) tuple"
     _, _, metadata = result
     assert metadata is not None
     assert "mode" in metadata
     assert "window" in metadata
     assert metadata["window"] == 60
+    assert metadata["refit_every"] == 30
     assert metadata["mode"] in ("causal_filter", "causal_rolling", "rolling_pearson_fallback")
 
 

@@ -260,9 +260,14 @@ def _train_window(
     test_dates: List[int],
     seed: int = 42,
     delta_target: bool = False,
+    dcc_refit_every: int = 0,
 ) -> dict:
     lr, use_cosine, patience = _hyperparam_lr(variant)
-    config = DyFOConfig(model_variant=variant, use_delta_target=delta_target)
+    config = DyFOConfig(
+        model_variant=variant,
+        use_delta_target=delta_target,
+        dcc_garch_refit_every=dcc_refit_every,
+    )
     return train_link_prediction(
         tickers=tickers,
         start=start,
@@ -379,6 +384,8 @@ def _run_normal(
     summary_out: dict,
     on_progress: Optional[callable] = None,
     delta_target: bool = False,
+    seeds: List[int] = DEFAULT_SEEDS,
+    dcc_refit_every: int = 0,
 ) -> dict:
     n_pairs = N_PAIRS_BY_TICKERS.get(len(tickers), len(tickers) * (len(tickers) - 1) // 2)
     comparison_pairs = list(combinations(variants, 2))
@@ -394,16 +401,29 @@ def _run_normal(
     for wi, (train_dates, val_dates, test_dates) in enumerate(windows, start=1):
         logger.info("-" * 60)
         logger.info(
-            "Window %d/%d | train=%d val=%d test=%d",
-            wi, len(windows), len(train_dates), len(val_dates), len(test_dates),
+            "Window %d/%d | train=%d val=%d test=%d (%d seeds)",
+            wi, len(windows), len(train_dates), len(val_dates), len(test_dates), len(seeds),
         )
 
         for variant in variants:
             logger.info("Training %s | window %d", variant.upper(), wi)
-            metrics = _train_window(
-                variant, data, start, end, tickers, epochs,
-                train_dates, val_dates, test_dates, delta_target=delta_target,
-            )
+            if len(seeds) > 1:
+                seed_metrics_list = []
+                for s_idx, seed in enumerate(seeds):
+                    logger.info("    Seed %d/%d (seed=%d)", s_idx + 1, len(seeds), seed)
+                    m = _train_window(
+                        variant, data, start, end, tickers, epochs,
+                        train_dates, val_dates, test_dates, seed=seed,
+                        delta_target=delta_target, dcc_refit_every=dcc_refit_every,
+                    )
+                    seed_metrics_list.append(m)
+                metrics = _aggregate_multiseed_metrics(seed_metrics_list, logger)
+            else:
+                metrics = _train_window(
+                    variant, data, start, end, tickers, epochs,
+                    train_dates, val_dates, test_dates, seed=seeds[0] if seeds else 42,
+                    delta_target=delta_target, dcc_refit_every=dcc_refit_every,
+                )
             logger.info(
                 "  %s | w%d >> R²=%.4f  MAE=%.4f  MSE=%.4f  Spearman=%.4f  loss=%.6f",
                 variant.upper(), wi,
@@ -720,6 +740,7 @@ def run_bootstrap_eval_temporal_kg_rev3(
     seeds: Optional[List[int]] = None,
     delta_target: bool = False,
     correlation_method: str = "dcc_garch",
+    dcc_refit_every: int = 0,
 ) -> dict:
     # Create output directory early so the log file lives alongside results
     ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
@@ -743,6 +764,7 @@ def run_bootstrap_eval_temporal_kg_rev3(
     logger.info("  variants   : %s", variants)
     logger.info("  n_tickers  : %d", n_tickers)
     logger.info("  corr_method: %s", correlation_method)
+    logger.info("  dcc_refit  : %d days", dcc_refit_every)
     if seeds is None:
         seeds = DEFAULT_SEEDS
 
@@ -775,6 +797,7 @@ def run_bootstrap_eval_temporal_kg_rev3(
         model_variant=variants[0] if variants else "tgn",
         correlation_method=correlation_method,
         use_delta_target=delta_target,
+        dcc_garch_refit_every=dcc_refit_every,
     )
     data_config = DataConfig(
         tickers=tickers, benchmark_ticker="SPY", start_date=start, end_date=end
@@ -813,6 +836,8 @@ def run_bootstrap_eval_temporal_kg_rev3(
             "windows_overlap": step_days < test_days,
             "n_bootstrap": n_bootstrap, "block_size": block_size,
             "seeds": seeds, "n_seeds": len(seeds),
+            "correlation_method": correlation_method,
+            "dcc_refit_every": dcc_refit_every,
         },
         "ablation": {"ablation_results": {}, "ablation_variant": ablation_variant if ablation else None, "ablation_ranking_by_sharpe": []},
         "descriptive_summary": {},
@@ -852,6 +877,8 @@ def run_bootstrap_eval_temporal_kg_rev3(
             summary_out=summary,
             on_progress=on_progress,
             delta_target=delta_target,
+            seeds=seeds,
+            dcc_refit_every=dcc_refit_every,
         )
 
         ablation_body = _run_ablation(
@@ -870,6 +897,7 @@ def run_bootstrap_eval_temporal_kg_rev3(
             on_progress=on_progress,
             seeds=seeds,
             delta_target=delta_target,
+            dcc_refit_every=dcc_refit_every,
         )
     else:
         results_body = _run_normal(
@@ -888,6 +916,8 @@ def run_bootstrap_eval_temporal_kg_rev3(
             summary_out=summary,
             on_progress=on_progress,
             delta_target=delta_target,
+            seeds=seeds,
+            dcc_refit_every=dcc_refit_every,
         )
 
     # ---- Assemble summary ---------------------------------------------------
@@ -991,6 +1021,12 @@ def main():
         default="dcc_garch",
         help="Correlation estimation method (default: dcc_garch).",
     )
+    parser.add_argument(
+        "--dcc_refit_every",
+        type=int,
+        default=0,
+        help="Days between periodic DCC-GARCH parameter recalibrations (default=0, initial calibration only).",
+    )
     args = parser.parse_args()
 
     run_bootstrap_eval_temporal_kg_rev3(
@@ -1011,6 +1047,7 @@ def main():
         seeds=args.seeds,
         delta_target=args.delta_target,
         correlation_method=args.correlation_method,
+        dcc_refit_every=args.dcc_refit_every,
     )
 
 
