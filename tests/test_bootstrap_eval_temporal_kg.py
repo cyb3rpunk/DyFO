@@ -1,4 +1,4 @@
-from scripts.run_bootstrap_eval_temporal_kg import (
+from scripts.run_bootstrap_eval_temporal_kg_rev3 import (
     TKG_COMPARISON_PAIRS,
     TKG_VARIANTS,
     run_bootstrap_eval_temporal_kg,

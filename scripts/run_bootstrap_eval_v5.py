@@ -255,8 +255,11 @@ def paired_block_bootstrap_multi(
 
 
 def load_or_prepare_data(tickers, start, end, benchmark, config, data_config, logger):
+    corr_m = getattr(config, "correlation_method", "dcc_garch")
+    dcc_mode = getattr(config, "dcc_garch_mode", "causal_filter")
+    dcc_refit = getattr(config, "dcc_garch_refit_every", 0)
     cache_key = hashlib.md5(
-        f"{sorted(tickers)}{start}{end}{benchmark}".encode()
+        f"{sorted(tickers)}{start}{end}{benchmark}_{corr_m}_{dcc_mode}_{dcc_refit}_causal_v3".encode()
     ).hexdigest()[:10]
     cache_path = RESULTS_DIR / f"prepared_data_cache_{cache_key}.pkl"
 

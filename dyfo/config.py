@@ -1,5 +1,6 @@
 """DyFO configuration dataclasses."""
 
+import os
 from dataclasses import dataclass, field
 from typing import ClassVar, List, Optional
 
@@ -60,8 +61,10 @@ class DyFOConfig:
     corr_sparsify_threshold: float = 0.3
 
     # --- Correlation ---
-    correlation_method: str = "dcc_garch"  # "rolling_pearson" or "dcc_garch"
+    correlation_method: str = "rolling_pearson"  # Strictly causal: "rolling_pearson" (default) or "dcc_garch"
     dcc_garch_window: int = 252
+    dcc_garch_mode: str = "causal_filter"  # "causal_filter" (default) | "causal_rolling" | "full_sample"
+    dcc_garch_refit_every: int = 0  # Days between periodic refits in causal_filter mode (0 = initial calibration only)
     rolling_corr_window: int = 63
     rolling_corr_windows: List[int] = field(default_factory=list)
     rolling_label_window: Optional[int] = None
@@ -90,7 +93,7 @@ class DataConfig:
     end_date: str = "2025-12-31"
 
     # --- FRED series IDs ---
-    fred_api_key: str = "7a786abc97ebd22946d8763e4d9130bf"  # 32-char hex string
+    fred_api_key: str = field(default_factory=lambda: os.getenv("FRED_API_KEY", ""))
     fred_series: dict = field(
         default_factory=lambda: {
             "fed_funds_rate": "DFF",
