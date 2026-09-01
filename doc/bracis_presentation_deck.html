@@ -1317,6 +1317,15 @@ ight)\)
         <input type="text" class="glossary-search-input" id="glossarySearch" placeholder="🔍 Filtrar conceitos (ex: Covariância, SPD, 1/N, Turnover, Sharpe, Higham, HRP)..." onkeyup="filterGlossary()">
       </div>
       <div class="glossary-content" id="glossaryCardsContainer">
+        <div class="glossary-card" data-keywords="tgat xu bochner atencao temporal diluicao relation aware heterogenea">
+          <div class="glossary-card-header">
+            <span class="glossary-term">0. TGAT Original vs. Relation-Aware TGAT (DyFO)</span>
+            <span class="glossary-ai-badge">Arquitetura Central de IA</span>
+          </div>
+          <p class="glossary-def">O TGAT original (Xu et al., ICLR 2020) usa codificação harmônica de Bochner em tempo contínuo, mas sofre de <em>diluição homogênea de atenção</em> em grafos densos O(N²). O DyFO cura essa patologia injetando o vetor de tipo de aresta (\(\mathbf{W}_E \mathbf{e}_{ij}\)) e desacoplando a agregação intra-relação da fusão semântica inter-relações (\(R^2: 0.852 \to 0.893\)).</p>
+          <div class="glossary-pitch"><strong>Como Explicar:</strong> &ldquo;O TGAT original tenta ouvir 100 vozes juntas em uma festa. O DyFO atua como uma mesa de som que separa e equaliza cada canal (setores, supply chain e macro) antes da mixagem final.&rdquo;</div>
+        </div>
+
         
         <div class="glossary-card" data-keywords="covariancia spd higham matriz adjacencia energia cone">
           <div class="glossary-card-header">
