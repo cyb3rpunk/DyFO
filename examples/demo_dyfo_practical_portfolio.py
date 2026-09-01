@@ -88,34 +88,61 @@ def solve_risk_parity_weights(cov_matrix: np.ndarray) -> np.ndarray:
     return w
 
 
-def calculate_portfolio_metrics(returns: np.ndarray, weights_history: np.ndarray) -> Dict[str, float]:
-    """Compute comprehensive financial metrics for a portfolio return stream."""
+def calculate_portfolio_metrics(
+    returns: np.ndarray,
+    weights_history: np.ndarray,
+    tx_cost_bps: float = 10.0,
+) -> Dict[str, float]:
+    """Compute comprehensive financial metrics for a portfolio return stream including transaction costs."""
     returns = np.nan_to_num(returns, nan=0.0)
     ann_factor = 252.0
-    mean_ret = float(np.mean(returns)) * ann_factor
-    vol = float(np.std(returns)) * np.sqrt(ann_factor)
-    sharpe = mean_ret / (vol + 1e-8)
-    
-    # Wealth curve & Max Drawdown
-    wealth = np.cumprod(1.0 + returns)
-    peak = np.maximum.accumulate(wealth)
-    drawdowns = (wealth - peak) / peak
-    mdd = float(np.min(drawdowns))
-    
-    # Turnover
+    c_tx = tx_cost_bps * 1e-4  # 10 bps = 0.0010 (0.10% per 100% turnover)
+
+    # Daily turnover & transaction cost drag
+    t_steps = len(returns)
     if len(weights_history) > 1:
         diffs = np.abs(weights_history[1:] - weights_history[:-1])
-        turnover = float(np.mean(np.sum(diffs, axis=1)))
+        daily_turnover = np.concatenate([[0.0], np.sum(diffs, axis=1)])[:t_steps]
+        mean_turnover = float(np.mean(daily_turnover[1:]))
     else:
-        turnover = 0.0
+        daily_turnover = np.zeros(t_steps)
+        mean_turnover = 0.0
+
+    daily_tx_cost = c_tx * daily_turnover
+    net_returns = returns - daily_tx_cost
+
+    # Gross Metrics (Before Costs)
+    gross_ret = float(np.mean(returns)) * ann_factor
+    gross_vol = float(np.std(returns)) * np.sqrt(ann_factor)
+    gross_sharpe = gross_ret / (gross_vol + 1e-8)
+    gross_wealth = np.cumprod(1.0 + returns)
+    gross_peak = np.maximum.accumulate(gross_wealth)
+    gross_mdd = float(np.min((gross_wealth - gross_peak) / gross_peak))
+
+    # Net Metrics (After Transaction Costs)
+    net_ret = float(np.mean(net_returns)) * ann_factor
+    net_vol = float(np.std(net_returns)) * np.sqrt(ann_factor)
+    net_sharpe = net_ret / (net_vol + 1e-8)
+    net_wealth = np.cumprod(1.0 + net_returns)
+    net_peak = np.maximum.accumulate(net_wealth)
+    net_mdd = float(np.min((net_wealth - net_peak) / net_peak))
+    ann_cost_drag_bps = float(np.mean(daily_tx_cost) * ann_factor * 10000.0)
 
     return {
-        "annualized_return": mean_ret,
-        "annualized_volatility": vol,
-        "sharpe_ratio": sharpe,
-        "max_drawdown": mdd,
-        "turnover": turnover,
-        "final_wealth": float(wealth[-1]),
+        "annualized_gross_return": gross_ret,
+        "annualized_net_return": net_ret,
+        "annualized_volatility": net_vol,
+        "gross_sharpe_ratio": gross_sharpe,
+        "net_sharpe_ratio": net_sharpe,
+        "max_drawdown": net_mdd,
+        "turnover": mean_turnover,
+        "annualized_cost_drag_bps": ann_cost_drag_bps,
+        "final_gross_wealth": float(gross_wealth[-1]),
+        "final_net_wealth": float(net_wealth[-1]),
+        # Default backward-compatible aliases
+        "annualized_return": net_ret,
+        "sharpe_ratio": net_sharpe,
+        "final_wealth": float(net_wealth[-1]),
     }
 
 
@@ -256,15 +283,15 @@ def main():
         results_summary[m] = calculate_portfolio_metrics(rets, wh)
 
     # 6. Display Tabular Report
-    print("\n" + "=" * 95)
-    print("  DYFO PRACTICAL QUANTITATIVE PORTFOLIO PERFORMANCE (OUT-OF-SAMPLE 1-YEAR TEST)  ")
-    print("=" * 95)
-    print(f"{'Strategy / Model':<24} | {'Ann. Ret':<9} | {'Ann. Vol':<9} | {'Sharpe':<8} | {'Max DD':<9} | {'Turnover':<9} | {'Wealth'}")
-    print("-" * 95)
+    print("\n" + "=" * 115)
+    print("  DYFO PRACTICAL QUANTITATIVE PORTFOLIO PERFORMANCE (OUT-OF-SAMPLE 1-YEAR TEST, 10 BPS TX COST)  ")
+    print("=" * 115)
+    print(f"{'Strategy / Model':<22} | {'Gross Ret':<9} | {'Net Ret':<9} | {'Net Vol':<9} | {'Net Sharpe':<10} | {'Max DD':<9} | {'Turnover':<9} | {'Cost Drag'}")
+    print("-" * 115)
     for m in models:
         res = results_summary[m]
-        print(f"{m:<24} | {res['annualized_return']*100:>7.2f}% | {res['annualized_volatility']*100:>7.2f}% | {res['sharpe_ratio']:>8.4f} | {res['max_drawdown']*100:>7.2f}% | {res['turnover']:>9.4f} | {res['final_wealth']:>7.4f}x")
-    print("=" * 95 + "\n")
+        print(f"{m:<22} | {res['annualized_gross_return']*100:>7.2f}% | {res['annualized_net_return']*100:>7.2f}% | {res['annualized_volatility']*100:>7.2f}% | {res['net_sharpe_ratio']:>10.4f} | {res['max_drawdown']*100:>7.2f}% | {res['turnover']:>9.4f} | {res['annualized_cost_drag_bps']:>6.1f} bps")
+    print("=" * 115 + "\n")
 
     # 7. Generate Publication-Grade 4-Panel Visualization
     fig_dir = Path("figures")
