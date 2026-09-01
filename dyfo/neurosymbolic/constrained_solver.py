@@ -16,14 +16,14 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from scipy.optimize import minimize
 
-from dyfo.core.link_prediction import project_to_spd_correlation
+from dyfo.core.link_prediction import project_to_spd_covariance
 from dyfo.neurosymbolic.symbolic_parser import ParsedConstraints
 
-logger = logging.getLogger("DyFO.NeuroSymbolic")
+logger = logging.getLogger("DyFO.NeuroSymbolicSolver")
 
 
 class ConstrainedPortfolioSolver:
-    """Solves symbolically-constrained Global Minimum Variance Portfolio (GMVP)."""
+    """Solves convex quadratic portfolio optimization over DyFO covariance with symbolic constraints."""
 
     def __init__(self, ridge_reg: float = 1e-5):
         self.ridge_reg = ridge_reg
@@ -34,7 +34,7 @@ class ConstrainedPortfolioSolver:
         constraints: Optional[ParsedConstraints] = None,
         target_cash_buffer: Optional[float] = None,
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
-        """Solve constrained portfolio weights.
+        """Solve constrained portfolio optimization: min (1/2) w^T Sigma w s.t. A_ub w <= b_ub, sum(w) = 1 - cash.
 
         Parameters
         ----------
@@ -52,8 +52,8 @@ class ConstrainedPortfolioSolver:
         """
         n = cov_matrix.shape[0]
 
-        # 1. Guarantee Strict SPD via Higham Projection & Regularization
-        sigma_spd = project_to_spd_correlation(cov_matrix) + np.eye(n) * self.ridge_reg
+        # 1. Guarantee Strict SPD via Covariance Projection & Regularization
+        sigma_spd = project_to_spd_covariance(cov_matrix, epsilon=1e-5) + np.eye(n) * self.ridge_reg
 
         # Determine target risky asset sum (1 - cash_buffer)
         cash_buffer = target_cash_buffer if target_cash_buffer is not None else (

@@ -18,11 +18,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from dyfo.core.link_prediction import project_to_spd_correlation
+from dyfo.core.link_prediction import project_to_spd_covariance
 from dyfo.core.ticker_registry import TICKERS_30, TICKER_GICS_MAPPING
 from dyfo.dqn.discrete_state import REGIME_ACTIONS, DiscreteDQNState
 from dyfo.dqn.dueling_dqn import DuelingDQNNetwork
 from dyfo.dqn.prioritized_replay import PrioritizedReplayBuffer
+from scipy.optimize import minimize
 
 logger = logging.getLogger("DyFO.DQN")
 
@@ -96,18 +97,24 @@ class DQNHedgingAgent:
         n = cov_matrix.shape[0]
         tickers = tickers or list(TICKERS_30)
         sec_map = sector_mapping or TICKER_GICS_MAPPING
-        sigma_spd = project_to_spd_correlation(cov_matrix) + np.eye(n) * 1e-5
+        sigma_spd = project_to_spd_covariance(cov_matrix, epsilon=1e-5) + np.eye(n) * 1e-5
 
         # -------------------------------------------------------------
-        # Action 0: ALPHA_GMVP (Standard Global Minimum Variance)
+        # Action 0: ALPHA_GMVP (Exact Convex Global Minimum Variance)
         # -------------------------------------------------------------
         if action == 0:
             try:
-                inv_s = np.linalg.pinv(sigma_spd)
-                ones = np.ones(n)
-                raw = inv_s @ ones
-                w = np.clip(raw / (ones @ raw), 0.0, 0.25)
-                return w / np.sum(w)
+                res = minimize(
+                    fun=lambda w: float(0.5 * w.T @ sigma_spd @ w),
+                    x0=np.full(n, 1.0 / n),
+                    method="SLSQP",
+                    bounds=[(0.0, 0.25) for _ in range(n)],
+                    constraints=[{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}],
+                    options={"maxiter": 100, "ftol": 1e-7},
+                )
+                if res.success:
+                    return res.x
+                return np.full(n, 1.0 / n)
             except Exception:
                 return np.full(n, 1.0 / n)
 

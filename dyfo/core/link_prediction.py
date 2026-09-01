@@ -574,6 +574,46 @@ def project_to_spd_correlation(
     return Y
 
 
+def project_to_spd_covariance(
+    matrix: torch.Tensor | np.ndarray,
+    epsilon: float = 1e-5,
+) -> torch.Tensor | np.ndarray:
+    """Project a symmetric covariance matrix onto the SPD cone without altering diagonal variance scales.
+
+    Computes X = V * max(Lambda, epsilon) * V^T, guaranteeing strict positive definiteness
+    while preserving individual asset volatilities.
+
+    Parameters
+    ----------
+    matrix : Tensor of shape (N, N) or np.ndarray of shape (N, N)
+        Symmetric covariance matrix.
+    epsilon : float, default 1e-5
+        Strict positive eigenvalue floor.
+
+    Returns
+    -------
+    Same type as input (Tensor or np.ndarray), guaranteed to be symmetric and strictly SPD.
+    """
+    is_torch = isinstance(matrix, torch.Tensor)
+    if is_torch:
+        device = matrix.device
+        dtype = matrix.dtype
+        mat = matrix.detach().cpu().numpy().astype(np.float64)
+    else:
+        mat = np.array(matrix, dtype=np.float64, copy=True)
+
+    # Enforce exact symmetry
+    sym = 0.5 * (mat + mat.T)
+    eigvals, eigvecs = np.linalg.eigh(sym)
+    eigvals_clipped = np.maximum(eigvals, epsilon)
+    X = (eigvecs * eigvals_clipped) @ eigvecs.T
+    X = 0.5 * (X + X.T)
+
+    if is_torch:
+        return torch.tensor(X, dtype=dtype, device=device)
+    return X
+
+
 def compute_graph_shrinkage_covariance(
     cov_gnn: np.ndarray,
     returns_history: np.ndarray,
@@ -616,7 +656,7 @@ def compute_graph_shrinkage_covariance(
     alpha = float(np.clip(alpha, 0.0, 1.0))
     cov_hybrid = alpha * cov_gnn + (1.0 - alpha) * cov_sample
 
-    # Ensure strictly positive definite
-    cov_hybrid = project_to_spd_correlation(cov_hybrid, epsilon=1e-5)
+    # Ensure strictly positive definite covariance (preserving individual variances)
+    cov_hybrid = project_to_spd_covariance(cov_hybrid, epsilon=1e-5)
     return cov_hybrid, alpha
 
