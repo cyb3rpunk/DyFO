@@ -80,7 +80,10 @@ from scripts.train_link_prediction import train_link_prediction
 # Constants
 # ---------------------------------------------------------------------------
 
-ALL_VARIANTS = ["temporal_kg", "ra_htgn", "tgn", "tgat", "roland", "gat_static", "persistence", "ewma", "zero", "delta_ewma"]
+ALL_VARIANTS = [
+    "temporal_kg", "ra_htgn", "tgn", "tgat", "roland", "gat_static",
+    "evolvegcn", "cdcc", "deco", "persistence", "ewma", "zero", "delta_ewma"
+]
 TKG_VARIANTS = ["temporal_kg", "ra_htgn", "tgn", "roland", "gat_static"]
 TKG_COMPARISON_PAIRS = [
     ("temporal_kg", "ra_htgn"),
@@ -147,7 +150,7 @@ def _hyperparam_lr(variant: str) -> Tuple[float, bool, int]:
     if variant in {"temporal_kg", "ra_htgn"}:
         # Slower-converging relational models need more patience + cosine LR
         return TKG_LR, TKG_USE_COSINE, TKG_PATIENCE
-    if variant in {"tgn", "tgat"}:
+    if variant in {"tgn", "tgat", "evolvegcn"}:
         return TGN_LR, TGN_USE_COSINE, TGN_PATIENCE
     return BASELINE_LR, BASELINE_USE_COSINE, BASELINE_PATIENCE
 
@@ -1004,6 +1007,201 @@ def main():
     parser.add_argument("--max_windows", type=int, default=None, help="Cap on windows (default=all).")
     parser.add_argument(
         "--seeds", nargs="+", type=int, default=None,
+        max_windows=max_windows,
+    )
+    if not windows:
+        raise RuntimeError("No walk-forward windows could be constructed.")
+    logger.info("Walk-forward windows: %d | date span=%s..%s", len(windows), start, end)
+
+    # ---- Dispatch -----------------------------------------------------------
+    # Global summary object passed around for incremental progress
+    summary = {
+        "version": "temporal_kg_rev3_bl18",
+        "revision_notes": (
+            "Rev 3: Added financial risk metrics MDD, Turnover, Volatility, CumRet "
+        ),
+        "run_config": {
+            "variants": variants,
+            "n_tickers": n_tickers,
+            "tickers": tickers,
+            "sparsification": sparsification,
+            "ablation_mode": ablation,
+            "ablation_variant": ablation_variant if ablation else None,
+            "start": start, "end": end, "epochs": epochs,
+            "train_days": train_days, "val_days": val_days,
+            "test_days": test_days, "step_days": step_days,
+            "n_windows": len(windows),
+            "windows_overlap": step_days < test_days,
+            "n_bootstrap": n_bootstrap, "block_size": block_size,
+            "seeds": seeds, "n_seeds": len(seeds),
+            "correlation_method": correlation_method,
+            "dcc_refit_every": dcc_refit_every,
+        },
+        "ablation": {"ablation_results": {}, "ablation_variant": ablation_variant if ablation else None, "ablation_ranking_by_sharpe": []},
+        "descriptive_summary": {},
+        "metrics_by_variant": {v: [] for v in variants},
+    }
+
+    if ablation:
+        if ablation == "basic":
+            ablation_sets = ABLATION_BASIC
+        elif ablation == "full":
+            ablation_sets = ABLATION_FULL
+        elif ablation == "corr_fact":
+            ablation_sets = ABLATION_CORR_FACT
+        else:
+            ablation_sets = ABLATION_BASIC
+        if ablation_variant not in variants:
+            logger.warning(
+                "ablation_variant=%s not in --variants; adding it automatically.",
+                ablation_variant,
+            )
+            variants = [ablation_variant] + [v for v in variants if v != ablation_variant]
+
+        # First run normal comparisons so ablation can reuse the "all_edges" baseline result
+        normal_body = _run_normal(
+            variants=variants,
+            data=data,
+            tickers=tickers,
+            windows=windows,
+            start=start,
+            end=end,
+            epochs=epochs,
+            n_bootstrap=n_bootstrap,
+            block_size=block_size,
+            step_days=step_days,
+            test_days=test_days,
+            logger=logger,
+            summary_out=summary,
+            on_progress=on_progress,
+            delta_target=delta_target,
+            seeds=seeds,
+            dcc_refit_every=dcc_refit_every,
+        )
+
+        ablation_body = _run_ablation(
+            ablation_variant=ablation_variant,
+            ablation_sets=ablation_sets,
+            data=data,
+            tickers=tickers,
+            windows=windows,
+            start=start,
+            end=end,
+            epochs=epochs,
+            n_bootstrap=n_bootstrap,
+            block_size=block_size,
+            logger=logger,
+            summary_out=summary,
+            on_progress=on_progress,
+            seeds=seeds,
+            delta_target=delta_target,
+            dcc_refit_every=dcc_refit_every,
+        )
+    else:
+        results_body = _run_normal(
+            variants=variants,
+            data=data,
+            tickers=tickers,
+            windows=windows,
+            start=start,
+            end=end,
+            epochs=epochs,
+            n_bootstrap=n_bootstrap,
+            block_size=block_size,
+            step_days=step_days,
+            test_days=test_days,
+            logger=logger,
+            summary_out=summary,
+            on_progress=on_progress,
+            delta_target=delta_target,
+            seeds=seeds,
+            dcc_refit_every=dcc_refit_every,
+        )
+
+    # ---- Assemble summary ---------------------------------------------------
+    # Output dir (out_dir) was created at the top of this function.
+    summary["log_file"] = str(out_dir / "execution.log")
+    out_path = out_dir / "bootstrap_summary_tkg_rev3.json"
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(summary, fh, indent=2)
+
+    logger.info("Saved summary -> %s", out_path)
+    logger.info("Execution log -> %s", out_dir / "execution.log")
+
+    if "zero" in variants and "persistence" in variants and delta_target:
+        zero_mae_rec = summary.get("descriptive_summary", {}).get("mean_window_metrics", {}).get("zero", {}).get("mae_reconstructed", np.nan)
+        persistence_mae = summary.get("descriptive_summary", {}).get("mean_window_metrics", {}).get("persistence", {}).get("mae", np.nan)
+        if not np.isnan(zero_mae_rec) and not np.isnan(persistence_mae):
+            assert abs(zero_mae_rec - persistence_mae) <= 1e-4, f"Sanity check failed: zero baseline mae_reconstructed ({zero_mae_rec:.6f}) != persistence mae ({persistence_mae:.6f})"
+
+    return summary
+
+
+run_bootstrap_eval_temporal_kg = run_bootstrap_eval_temporal_kg_rev3
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="DyFO bootstrap eval BL-18 Temporal KG - Rev 3",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__.encode("ascii", "ignore").decode("ascii") if __doc__ else None,
+    )
+    parser.add_argument(
+        "--variants",
+        nargs="+",
+        choices=ALL_VARIANTS,
+        default=ALL_VARIANTS,
+        metavar="VARIANT",
+        help=(
+            "Variants to train (space-separated). "
+            f"Choices: {ALL_VARIANTS}. Default: all."
+        ),
+    )
+    parser.add_argument(
+        "--n_tickers",
+        type=int,
+        choices=[30, 50, 100],
+        default=DEFAULT_N_TICKERS,
+        help="Universe size (30 / 50 / 100). Default: 30.",
+    )
+    parser.add_argument(
+        "--ablation",
+        choices=["basic", "full", "corr_fact"],
+        default=None,
+        help=(
+            "Edge-type ablation mode. "
+            "'basic' = CORR_only / CORR+SECT / CORR+FACT; "
+            "'full' = basic + all_edges; "
+            "'corr_fact' = CORR+FACT only. Default: disabled."
+        ),
+    )
+    parser.add_argument(
+        "--ablation_variant",
+        choices=ALL_VARIANTS,
+        default="tgn",
+        help="Which variant to ablate (default: tgn).",
+    )
+    parser.add_argument("--start", default=DEFAULT_START)
+    parser.add_argument("--end", default=DEFAULT_END)
+    parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
+    parser.add_argument("--train_days", type=int, default=DEFAULT_TRAIN_DAYS)
+    parser.add_argument("--val_days", type=int, default=DEFAULT_VAL_DAYS)
+    parser.add_argument("--test_days", type=int, default=DEFAULT_TEST_DAYS)
+    parser.add_argument(
+        "--step_days",
+        type=int,
+        default=DEFAULT_STEP_DAYS,
+        help="Step between windows (default=test_days, non-overlapping).",
+    )
+    parser.add_argument("--n_bootstrap", type=int, default=DEFAULT_N_BOOTSTRAP)
+    parser.add_argument("--block_size", type=int, default=DEFAULT_BLOCK_SIZE)
+    parser.add_argument("--max_windows", type=int, default=None, help="Cap on windows (default=all).")
+    parser.add_argument(
+        "--seeds", nargs="+", type=int, default=None,
         help=(
             "RNG seeds for multi-seed ablation (default: [42]). "
             "Use --seeds 42 123 456 789 2024 for 5-seed validation."
@@ -1014,6 +1212,12 @@ def main():
         action="store_true",
         default=False,
         help="Use Delta rho = rho_{t+1} - rho_t as target.",
+    )
+    parser.add_argument(
+        "--target_mode",
+        choices=["absolute", "delta"],
+        default="absolute",
+        help="Target mode: 'absolute' (predict rho_{t+1}) or 'delta' (predict Delta rho).",
     )
     parser.add_argument(
         "--correlation_method",
@@ -1028,6 +1232,8 @@ def main():
         help="Days between periodic DCC-GARCH parameter recalibrations (default=0, initial calibration only).",
     )
     args = parser.parse_args()
+
+    use_delta = args.delta_target or (args.target_mode == "delta")
 
     run_bootstrap_eval_temporal_kg_rev3(
         variants=args.variants,
@@ -1045,7 +1251,7 @@ def main():
         block_size=args.block_size,
         max_windows=args.max_windows,
         seeds=args.seeds,
-        delta_target=args.delta_target,
+        delta_target=use_delta,
         correlation_method=args.correlation_method,
         dcc_refit_every=args.dcc_refit_every,
     )
